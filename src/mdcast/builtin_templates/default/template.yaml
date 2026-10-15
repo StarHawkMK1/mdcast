@@ -1,0 +1,94 @@
+schema: 1
+name: default
+version: 1.0.0
+description: mdcast 내장 기본 템플릿 (중립 스타터)
+extends: null
+
+files:
+  docx: reference.docx
+  hwpx: reference.hwpx
+  pdf: pdf.typ
+
+page:
+  size: A4
+  orientation: portrait
+  margin: { top: 20mm, bottom: 15mm, left: 20mm, right: 20mm }
+
+fonts:
+  body:    { family: "맑은 고딕", fallback: ["Noto Sans KR"] }
+  heading: { family: "맑은 고딕", fallback: ["Noto Sans KR"] }
+  code:    { family: "Consolas", fallback: ["Noto Sans KR"] }
+
+elements:
+  heading1: { size: 16pt, bold: true, italic: null, color: "#1F3864", align: null, line_height: null, space_before: 12pt, space_after: 6pt, indent_left: null, background: null, keep_with_next: true }
+  heading2: { size: 14pt, bold: true, italic: null, color: null, align: null, line_height: null, space_before: 10pt, space_after: 4pt, indent_left: null, background: null, keep_with_next: true }
+  heading3: { size: 12pt, bold: true, italic: null, color: null, align: null, line_height: null, space_before: 8pt, space_after: 4pt, indent_left: null, background: null, keep_with_next: true }
+  heading4: { size: 11pt, bold: true, italic: null, color: null, align: null, line_height: null, space_before: 6pt, space_after: 3pt, indent_left: null, background: null, keep_with_next: true }
+  heading5: { size: 11pt, bold: true, italic: null, color: null, align: null, line_height: null, space_before: 6pt, space_after: 3pt, indent_left: null, background: null, keep_with_next: true }
+  heading6: { size: 11pt, bold: true, italic: null, color: null, align: null, line_height: null, space_before: 6pt, space_after: 3pt, indent_left: null, background: null, keep_with_next: true }
+  body:     { size: 11pt, bold: null, italic: null, color: null, align: justify, line_height: 160%, space_before: 0pt, space_after: 4pt, indent_left: null, background: null, keep_with_next: null }
+  quote:    { size: 10.5pt, bold: null, italic: null, color: "#555555", align: null, line_height: null, space_before: null, space_after: null, indent_left: 5mm, background: null, keep_with_next: null }
+  code:     { size: 9.5pt, bold: null, italic: null, color: null, align: null, line_height: null, space_before: null, space_after: null, indent_left: null, background: "#F6F8FA", keep_with_next: null }
+  caption:  { size: 9.5pt, bold: true, italic: null, color: null, align: center, line_height: null, space_before: null, space_after: null, indent_left: null, background: null, keep_with_next: null }
+  footnote: { size: 9pt, bold: null, italic: null, color: null, align: null, line_height: null, space_before: null, space_after: null, indent_left: null, background: null, keep_with_next: null }
+
+styles:
+  heading1: { docx: "Heading 1", hwpx: "개요 1" }
+  heading2: { docx: "Heading 2", hwpx: "개요 2" }
+  heading3: { docx: "Heading 3", hwpx: "개요 3" }
+  heading4: { docx: "Heading 4", hwpx: "개요 4" }
+  heading5: { docx: "Heading 5", hwpx: "개요 5" }
+  heading6: { docx: "Heading 6", hwpx: "개요 6" }
+  body:     { docx: "Body Text", hwpx: "바탕글" }
+  quote:    { docx: "Block Text", hwpx: "바탕글" }
+  code:     { docx: "Source Code", hwpx: "바탕글" }
+  caption:  { docx: "Table Caption", hwpx: "캡션" }
+  footnote: { docx: "Footnote Text", hwpx: "각주" }
+  table:    { docx: "Table", hwpx: null }
+
+headings:
+  numbering: []
+
+lists:
+  bullet:  ["□", "○", "-", "·"]
+  ordered: ["1.", "가.", "1)", "가)", "(1)", "(가)"]
+  indent_per_level: 5mm
+
+tables:
+  width: full
+  font_size: 10pt
+  cell_padding: 1.5mm
+  border:       { width: 0.5pt, color: "#000000" }
+  border_outer: { width: 1pt, color: "#000000" }
+  header:       { background: "#F2F2F2", bold: true, align: center, valign: middle, repeat: true }
+  body:         { align: left, valign: middle, zebra: null }
+  first_column: { bold: false, background: null }
+  caption:      { position: above, format: "<표 {n}> {text}" }
+  variants: {}
+
+figures:
+  max_width: 100%
+  align: center
+  caption: { position: below, format: "[그림 {n}] {text}" }
+
+header:
+  source: yaml
+  left: ""
+  center: ""
+  right: "{{title}}"
+  line: below
+  logo: null
+
+footer:
+  source: yaml
+  left: ""
+  center: "{{page}} / {{pages}}"
+  right: ""
+  line: none
+
+fields:
+  defaults: {}
+  date_format: "YYYY-MM-DD"
+
+layout:
+  page_break: { before: [], skip_first: true }
