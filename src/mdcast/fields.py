@@ -91,7 +91,11 @@ def resolve_fields(
         if key in RESERVED:
             report.info(Codes.FIELD_RESERVED, f"'{key}' 는 예약 키라 frontmatter 값을 무시합니다", field=key)
             continue
-        values[str(key)] = _to_str(value)
+        text = _to_str(value)
+        if text.strip() == "":
+            # a blank frontmatter value falls through to fields.defaults
+            continue
+        values[str(key)] = text
     values["today"] = format_date(today or date.today(), fields_cfg.get("date_format") or "YYYY-MM-DD")
 
     def expand(match: re.Match[str]) -> str:

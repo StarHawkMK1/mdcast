@@ -46,5 +46,32 @@ def test_list_values_are_joined():
     assert f.text("{{authors}}") == "김, 이"
 
 
+def test_blank_frontmatter_falls_through_to_default():
+    overrides = {"fields": {"defaults": {"security": "대외비"}}}
+    for blank in (None, "", "   "):
+        f, r = make({"security": blank}, overrides)
+        assert f.text("{{security}}") == "대외비"
+        assert r.events == []
+
+
+def test_blank_frontmatter_without_default_is_empty_with_info():
+    f, r = make({"security": None})
+    assert f.text("{{security}}") == ""
+    assert [e.code for e in r.events] == [Codes.FIELD_EMPTY]
+
+
+def test_odd_frontmatter_value_types_do_not_raise():
+    fm = {
+        "count": 3,
+        "flag": True,
+        "when": date(2026, 10, 15),
+        "tags": ["김", None],
+        "meta": {"a": 1},
+        "nothing": None,
+    }
+    f, _ = make(fm)
+    assert f.text("{{count}}|{{flag}}|{{when}}|{{tags}}|{{meta}}|{{nothing}}") == "3|True|2026-10-15|김, ||"
+
+
 def test_keys_in():
     assert keys_in("{{dept}} - {{ title }} {{page}}") == ["dept", "title", "page"]
