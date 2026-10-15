@@ -36,6 +36,7 @@ packages = ["src/mdcast"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests"]
 filterwarnings = ["ignore::SyntaxWarning"]
 markers = [
   "visual: page-image comparison against tests/golden (run with --run-visual)",
