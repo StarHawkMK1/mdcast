@@ -1,0 +1,59 @@
+import panflute as pf
+
+from mdcast.readers.md import read_md
+from mdcast.report import Codes, Level, Report
+from mdcast.types import Format, Source
+
+
+def read(data: bytes):
+    report = Report("a.md", Format.MD)
+    return read_md(Source(data, "a.md", Format.MD), report), report
+
+
+def test_frontmatter_and_body():
+    md, r = read("---\ntitle: 사업계획\nn: 3\nl: [a, b]\npage_break: {before: [h2]}\n---\n\n# 개요\n".encode())
+    assert md.frontmatter == {"title": "사업계획", "n": "3", "l": ["a", "b"], "page_break": {"before": ["h2"]}}
+    assert isinstance(md.doc.content[0], pf.Header)
+    assert r.events == []
+
+
+def test_bom_is_ignored():
+    md, r = read(("\ufeff# 제목\n").encode())
+    assert pf.stringify(md.doc.content[0]) == "제목"
+    assert r.events == []
+
+
+def test_cp949_input_is_read_with_info():
+    md, r = read("# 제목\n\n본문입니다\n".encode("cp949"))
+    assert pf.stringify(md.doc.content[0]) == "제목"
+    assert [(e.level, e.code) for e in r.events] == [(Level.INFO, Codes.INPUT_ENCODING_FALLBACK)]
+
+
+def test_pagebreak_marker_survives_as_raw_html():
+    md, _ = read(b"a\n\n<!-- pagebreak -->\n\nb\n")
+    raw = md.doc.content[1]
+    assert isinstance(raw, pf.RawBlock) and raw.format == "html"
+
+
+def test_html_table_becomes_table_with_spans():
+    html = (
+        "<table><thead><tr><th rowspan=\"2\">구분</th><th colspan=\"2\">값</th></tr>"
+        "<tr><th>a</th><th>b</th></tr></thead>"
+        "<tbody><tr><td>X</td><td>1</td><td>2</td></tr></tbody></table>\n"
+    )
+    md, _ = read(html.encode())
+    table = md.doc.content[0]
+    assert isinstance(table, pf.Table)
+    first_head_row = table.head.content[0].content
+    assert (first_head_row[0].rowspan, first_head_row[1].colspan) == (2, 2)
+
+
+def test_empty_input():
+    md, _ = read(b"")
+    assert list(md.doc.content) == [] and md.frontmatter == {}
+
+
+def test_undecodable_input_is_read_with_replacement_and_warn():
+    md, r = read(b"# \xff\xfe\n")
+    assert isinstance(md.doc.content[0], pf.Header)
+    assert [(e.level, e.code) for e in r.events] == [(Level.WARN, Codes.INPUT_ENCODING_FALLBACK)]
