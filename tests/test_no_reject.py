@@ -43,8 +43,11 @@ CASES = {
 }
 
 FRONTMATTER_CASES = {
-    "frontmatter-page-break-int": "---\ntitle: t\npage_break: {before: 3}\n---\n\n# 하나\n\n본문\n\n# 둘\n\n본문\n",
-    "frontmatter-malformed-yaml": "---\ntitle: [unclosed\n---\n\n# 본문\n",
+    "frontmatter-page-break-int": (
+        "---\ntitle: t\npage_break: {before: 3}\n---\n\n# 하나\n\n본문\n\n# 둘\n\n본문\n",
+        Codes.TEMPLATE_INVALID,
+    ),
+    "frontmatter-malformed-yaml": ("---\ntitle: [unclosed\n---\n\n# 본문\n", Codes.FRONTMATTER_INVALID),
 }
 
 
@@ -76,9 +79,9 @@ def test_broken_templates_never_reject(tmp_path, case, fixture):
 
 @pytest.mark.parametrize("case", sorted(FRONTMATTER_CASES))
 def test_broken_frontmatter_never_rejects(tmp_path, case):
-    source = Source(FRONTMATTER_CASES[case].encode("utf-8"), "doc.md", Format.MD, base_dir=tmp_path)
+    text, expected = FRONTMATTER_CASES[case]
+    source = Source(text.encode("utf-8"), "doc.md", Format.MD, base_dir=tmp_path)
     result = _convert(tmp_path, source, None)
     assert len(result.outputs) == 2
     assert all(o.data for o in result.outputs), [e.to_dict() for e in result.report.events]
-    if case == "frontmatter-malformed-yaml":
-        assert Codes.FRONTMATTER_INVALID in [e.code for e in result.report.events]
+    assert expected in [e.code for e in result.report.events]

@@ -9,6 +9,7 @@ from mdcast import pipeline
 from mdcast.report import Level
 from mdcast.types import Format, Options, Source
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).parent / "fixtures" / "md"
 TEMPLATE_WITH_PLAIN = (
     "name: e2e\n"
@@ -37,7 +38,12 @@ def test_fixture_converts_to_docx_and_pdf(tmp_path, name):
     assert any(p.text.startswith("Ⅰ.") for p in document.paragraphs)
     pdf = pdfium.PdfDocument(outputs[Format.PDF].data)
     assert len(pdf) >= 2
-    out_dir = Path(".test-output") / "e2e"
+    if name == "kitchen-sink.md":
+        assert len(document.tables) >= 3
+        body = document.element.xml
+        assert "<a:blip" in body
+        assert 'w:type="page"' in body
+    out_dir = REPO_ROOT / ".test-output" / "e2e"
     out_dir.mkdir(parents=True, exist_ok=True)
     for output in result.outputs:
         (out_dir / output.name).write_bytes(output.data)
