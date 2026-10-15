@@ -94,11 +94,18 @@ def main() -> None:
 @click.option("--offline", is_flag=True, help="외부 이미지를 내려받지 않음")
 def convert(input_path, to, template, out_dir, as_json, verbose, quiet, keep_temp, offline) -> None:
     """MD 파일을 템플릿에 맞춰 변환합니다."""
+    targets = []
+    for name in (t.strip() for t in to.split(",")):
+        if not name:
+            continue
+        try:
+            targets.append(Format.parse(name))
+        except ValueError:
+            raise click.UsageError(f"지원하지 않는 형식: {name} (docx, pdf 중 선택)") from None
     try:
-        targets = [Format.parse(t) for t in to.split(",") if t.strip()]
         source_format = Format.from_filename(input_path.name)
-    except ValueError as exc:
-        raise click.UsageError(f"지원하지 않는 형식입니다: {exc}") from exc
+    except ValueError:
+        raise click.UsageError(f"지원하지 않는 입력 형식: {input_path.name} (.md 파일을 지정하세요)") from None
     if not targets:
         raise click.UsageError("--to 에 출력 포맷을 지정하세요")
     try:
@@ -127,7 +134,9 @@ def convert(input_path, to, template, out_dir, as_json, verbose, quiet, keep_tem
     if as_json:
         click.echo(json.dumps(result.report.to_dict(), ensure_ascii=False, indent=2))
     else:
-        click.echo(render_human(result.report, verbose=verbose, quiet=quiet))
+        text = render_human(result.report, verbose=verbose, quiet=quiet)
+        if text:
+            click.echo(text)
     sys.exit(1 if any(o["status"] == "failed" for o in result.report.outputs) else 0)
 
 

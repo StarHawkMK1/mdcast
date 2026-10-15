@@ -34,6 +34,10 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/mdcast"]
 
+[tool.hatch.build.targets.sdist]
+# hatch does not read nested .gitignore files: keep process notes, caches and scratch out
+exclude = [".superpowers", ".test-output", "graft", "spikes"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["tests"]

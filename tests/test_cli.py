@@ -167,3 +167,30 @@ def test_frontmatter_template_path_is_relative_to_the_document(env):
     assert r.exit_code == 0, r.output
     assert "템플릿: doc-form" in r.output
     assert "찾지 못해" not in r.output
+
+
+def test_first_run_shows_no_panflute_syntax_warning(tmp_path):
+    # a fresh bytecode cache makes Python compile panflute from source, as on the first run after install
+    env = {k: v for k, v in os.environ.items() if k not in ("PYTHONWARNINGS", "PYTHONDONTWRITEBYTECODE")}
+    proc = subprocess.run(
+        [sys.executable, "-X", f"pycache_prefix={tmp_path / 'pycache'}", "-m", "mdcast", "--version"],
+        capture_output=True,
+        env=env,
+        timeout=120,
+        check=False,
+    )
+    assert proc.returncode == 0
+    assert b"SyntaxWarning" not in proc.stderr, proc.stderr.decode("utf-8", "replace")
+
+
+def test_unknown_format_message_is_korean_only(env):
+    r = run("convert", str(write_md(env)), "--to", "txt")
+    assert r.exit_code == 2
+    assert "지원하지 않는 형식: txt (docx, pdf 중 선택)" in r.output
+    assert "is not a valid" not in r.output
+
+
+def test_quiet_success_prints_nothing(env):
+    r = run("convert", str(write_md(env)), "--quiet", "--offline")
+    assert r.exit_code == 0
+    assert r.output == ""
