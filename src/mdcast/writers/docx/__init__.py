@@ -10,6 +10,7 @@ from mdcast.ast import convert_doc
 from mdcast.report import Codes
 from mdcast.writers.context import RenderError, WriterContext
 from mdcast.writers.docx.headers import apply_headers
+from mdcast.writers.docx.numbering import apply_list_numbering
 from mdcast.writers.docx.styles import apply_elements, apply_page, remap_styles
 from mdcast.writers.images import localize_images
 
@@ -55,6 +56,7 @@ def write_docx(doc: pf.Doc, ctx: WriterContext) -> bytes:
     used = remap_styles(d, config, ctx.report)
     apply_elements(d, looks, used)
     apply_headers(d, config, ctx.fields)
+    apply_list_numbering(d, config)
     buffer = io.BytesIO()
     d.save(buffer)
     return buffer.getvalue()
