@@ -10,14 +10,12 @@ import docx
 import pypandoc
 from docx.enum.style import WD_STYLE_TYPE
 
-from mdcast.ast import clone
 from mdcast.fields import resolve_fields
-from mdcast.filters import FilterContext, run_filters
+from mdcast.pipeline import build_generator, prepare_target
 from mdcast.readers.md import read_md
 from mdcast.report import Report
 from mdcast.templates import resolve_template
 from mdcast.types import Format, Options, Source
-from mdcast.writers.context import WriterContext
 
 
 def write_template(
@@ -46,22 +44,17 @@ def build(tmp_path: Path, md: str, target: Format, template: str | None = None, 
     ref = template or document.frontmatter.get("template")
     tpl = resolve_template(ref, cwd=tmp_path, home=tmp_path / "home", report=report)
     fields = resolve_fields(document.frontmatter, tpl.config, report)
-    fctx = FilterContext(target, tpl.config, document.frontmatter, report)
-    doc = run_filters(clone(document.doc), fctx)
-    work = tmp_path / f"work-{target.value}"
-    work.mkdir(exist_ok=True)
-    ctx = WriterContext(
-        target=target,
-        template=tpl,
-        fields=fields,
-        report=report,
-        options=Options(offline=offline, cwd=tmp_path, home=tmp_path / "home"),
-        base_dir=tmp_path,
-        work_dir=work,
-        state=fctx.state,
-        generator={"generator": "mdcast test", "template": {"name": tpl.name, "source": tpl.source}},
+    return prepare_target(
+        document,
+        target,
+        tpl,
+        fields,
+        report,
+        Options(offline=offline, cwd=tmp_path, home=tmp_path / "home"),
+        tmp_path,
+        tmp_path / f"work-{target.value}",
+        build_generator(tpl),
     )
-    return doc, ctx
 
 
 def make_reference_docx(

@@ -117,7 +117,8 @@ def test_custom_properties_part_has_template_name(tmp_path):
           "vt": "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"}
     values = {p.get("name"): p.find("vt:lpwstr", ns).text for p in root.findall("cp:property", ns)}
     assert values["mdcast.template.name"] == "default"
-    assert values["mdcast.generator"] == "mdcast test"
+    assert values["mdcast.generator"].startswith("mdcast ")
+    assert values["mdcast.typst"] and values["mdcast.pandoc"]
     assert min(int(p.get("pid")) for p in root.findall("cp:property", ns)) == 2
     assert "custom.xml" in archive.read("[Content_Types].xml").decode()
     assert "custom-properties" in archive.read("_rels/.rels").decode()
