@@ -3,6 +3,7 @@ import json
 import zipfile
 
 import docx
+import pytest
 from docx.oxml.ns import qn
 from helpers import build, make_reference_docx, write_template
 from lxml import etree
@@ -220,3 +221,15 @@ def test_record_count_mismatch_applies_no_variants_and_warns(tmp_path):
     assert ids == ["Table", "Table"]
     assert len(report.events) == 1 and report.events[0].where.get("format") == "docx"
     assert not any(st.style_id.startswith("MdcastTable") for st in d.styles)
+
+
+@pytest.mark.parametrize("url", ["none.png", "data:image/png;base64,iVBORw0KGgo="])
+def test_failed_figure_image_keeps_table_variants(tmp_path, url):
+    tpl = write_template(tmp_path, "t", VARIANT_TPL)
+    md = f"![없는 그림]({url})\n\n<!-- table: plain -->\n\n| a |\n|---|\n| 1 |\n"
+    doc, ctx = build(tmp_path, md, Format.DOCX, template=str(tpl))
+    data = write_docx(doc, ctx)
+    assert table_style_ids(data) == ["MdcastTable1"]
+    codes = [e.code for e in ctx.report.events]
+    assert Codes.IMAGE_FETCH_FAILED in codes
+    assert Codes.STYLE_UNMAPPED not in codes and Codes.RENDER_WARNING not in codes

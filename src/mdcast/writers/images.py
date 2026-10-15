@@ -6,6 +6,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
+from collections.abc import Callable
 from pathlib import Path
 
 import panflute as pf
@@ -54,13 +56,12 @@ def _fetch(url: str, timeout: float) -> bytes:
     return b"".join(chunks)
 
 
-def _load(url: str, ctx: WriterContext) -> tuple[bytes, str]:
+def _load(url: str, ctx: WriterContext) -> bytes:
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme in ("http", "https"):
         if ctx.options.offline:
             raise _ImageError("오프라인 모드")
-        data = _fetch(url, ctx.options.url_timeout_s)
-        return data, Path(parsed.path).suffix.lower() or ".png"
+        return _fetch(url, ctx.options.url_timeout_s)
     if parsed.scheme and len(parsed.scheme) > 1:
         raise _ImageError(f"지원하지 않는 주소 형식: {parsed.scheme}")
     path = Path(urllib.parse.unquote(url))
@@ -69,34 +70,113 @@ def _load(url: str, ctx: WriterContext) -> tuple[bytes, str]:
     if not path.is_file():
         raise _ImageError("파일이 없습니다")
     try:
-        data = path.read_bytes()
+        return path.read_bytes()
     except OSError as exc:
         raise _ImageError(str(exc)) from exc
-    return data, path.suffix.lower() or ".png"
 
 
-def localize_images(doc: pf.Doc, ctx: WriterContext) -> pf.Doc:
+def _png_complete(data: bytes) -> bool:
+    """Every chunk is whole with a matching CRC, up to IEND (catches truncated or damaged files)."""
+    pos = 8
+    while pos + 12 <= len(data):
+        length = int.from_bytes(data[pos : pos + 4], "big")
+        end = pos + 12 + length
+        if end > len(data):
+            return False
+        if zlib.crc32(data[pos + 4 : end - 4]) != int.from_bytes(data[end - 4 : end], "big"):
+            return False
+        if data[pos + 4 : pos + 8] == b"IEND":
+            return True
+        pos = end
+    return False
+
+
+def _extension(data: bytes) -> str:
+    """The file extension for the image bytes; the renderers pick their decoder by extension."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        if not _png_complete(data):
+            raise _ImageError("이미지 파일이 손상되었습니다")
+        return ".png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return ".gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp"
+    head = data[:4096].lstrip(b"\xef\xbb\xbf \t\r\n")
+    if head.startswith(b"<") and b"<svg" in head.lower():
+        return ".svg"
+    raise _ImageError("지원하지 않는 이미지 형식입니다 (PNG, JPEG, GIF, WebP, SVG 만 지원)")
+
+
+def _caption_inlines(figure: pf.Figure) -> list[pf.Inline]:
+    inlines: list[pf.Inline] = []
+    for block in figure.caption.content if figure.caption else []:
+        if isinstance(block, (pf.Plain, pf.Para)):
+            if inlines:
+                inlines.append(pf.Space())
+            inlines.extend(block.content)
+    return inlines
+
+
+def localize_images(
+    doc: pf.Doc, ctx: WriterContext, check: Callable[[str], str | None] | None = None
+) -> pf.Doc:
+    """Copy every image into ``work_dir/assets`` under a name whose extension matches its bytes.
+
+    An image that cannot be loaded, is of an unsupported type, or is rejected by ``check``
+    (given the ``assets/...`` path, returns a reason or ``None``) becomes a placeholder with an
+    IMAGE_FETCH_FAILED warning. A figure that lost an image becomes a plain paragraph that keeps
+    its caption text, so the writers do not turn it into a layout table.
+    """
     assets = ctx.work_dir / "assets"
     assets.mkdir(parents=True, exist_ok=True)
     counter = itertools.count(1)
+    placeholders: set[int] = set()
 
-    def action(elem: pf.Element, _doc: pf.Doc):
-        if not isinstance(elem, pf.Image):
-            return None
+    def localize(elem: pf.Image) -> pf.Element | None:
         try:
-            data, ext = _load(elem.url, ctx)
+            data = _load(elem.url, ctx)
+            name = f"img{next(counter)}{_extension(data)}"
+            (assets / name).write_bytes(data)
+            reason = check(f"assets/{name}") if check is not None else None
+            if reason is not None:
+                raise _ImageError(reason)
         except _ImageError as exc:
             alt = pf.stringify(elem).strip() or elem.url
             ctx.report.warn(
                 Codes.IMAGE_FETCH_FAILED,
-                f"이미지를 가져오지 못해 자리표시로 대체했습니다: {elem.url} ({exc})",
+                f"이미지를 쓸 수 없어 자리표시로 대체했습니다: {elem.url} ({exc})",
                 format=ctx.target.value,
                 url=elem.url,
             )
-            return pf.Emph(pf.Str(f"[이미지: {alt}]"))
-        name = f"img{next(counter)}{ext}"
-        (assets / name).write_bytes(data)
+            placeholder = pf.Emph(pf.Str(f"[이미지: {alt}]"))
+            placeholders.add(id(placeholder))
+            return placeholder
         elem.url = f"assets/{name}"
+        return None
+
+    def unwrap(figure: pf.Figure) -> pf.Element | None:
+        lost: list[bool] = []
+        figure.content.walk(lambda e, _d: lost.append(True) if id(e) in placeholders else None)
+        if not lost:
+            return None
+        inlines: list[pf.Inline] = []
+        for block in figure.content:
+            if isinstance(block, (pf.Plain, pf.Para)):
+                if inlines:
+                    inlines.append(pf.LineBreak())
+                inlines.extend(block.content)
+        caption = _caption_inlines(figure)
+        if caption:
+            inlines += [pf.LineBreak(), *caption]
+        return pf.Para(*inlines)
+
+    def action(elem: pf.Element, _doc: pf.Doc):
+        if isinstance(elem, pf.Image):
+            return localize(elem)
+        if isinstance(elem, pf.Figure):
+            return unwrap(elem)
         return None
 
     return doc.walk(action)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import struct
 import subprocess
 import textwrap
@@ -35,6 +36,22 @@ def tiny_png() -> bytes:
 
     header = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
     return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(b"\x00\xff\xff\xff")) + chunk(b"IEND", b"")
+
+
+def tiny_jpeg() -> bytes:
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (2, 2), (200, 30, 30)).save(buffer, format="JPEG")
+    return buffer.getvalue()
+
+
+def tiny_bmp() -> bytes:
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (2, 2), (30, 30, 200)).save(buffer, format="BMP")
+    return buffer.getvalue()
 
 
 def build(tmp_path: Path, md: str, target: Format, template: str | None = None, *, offline: bool = True):

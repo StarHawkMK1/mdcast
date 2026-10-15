@@ -20,12 +20,28 @@ MAIN_PREAMBLE = (
     "#let cfg = json(bytes(sys.inputs.cfg))\n"
     "#show: conf.with(cfg)\n"
 )
+IMAGE_PROBE = '#set page(width: auto, height: auto, margin: 0pt)\n#image("{path}", width: 1cm)\n'
 
 
 def _compile(main: Path, root: Path, cfg_json: str):
     return typst.compile_with_warnings(
         str(main), root=str(root), font_paths=font_paths(), sys_inputs={"cfg": cfg_json}
     )
+
+
+def _decodable_by_typst(work_dir: Path):
+    """``localize_images`` check: Typst must be able to decode the image, or the whole PDF fails."""
+
+    def check(path: str) -> str | None:
+        probe = work_dir / "image-probe.typ"
+        probe.write_text(IMAGE_PROBE.format(path=path), encoding="utf-8")
+        try:
+            typst.compile(str(probe), root=str(work_dir), ignore_system_fonts=True)
+        except typst.TypstError as exc:
+            return f"PDF 조판기가 읽을 수 없는 이미지입니다: {exc}"
+        return None
+
+    return check
 
 
 def _reset_ordered_lists(doc: pf.Doc) -> None:
@@ -61,7 +77,7 @@ def _report_warnings(warnings, ctx: WriterContext, report: Report) -> None:
 
 
 def write_pdf(doc: pf.Doc, ctx: WriterContext) -> bytes:
-    doc = localize_images(doc, ctx)
+    doc = localize_images(doc, ctx, check=_decodable_by_typst(ctx.work_dir))
     _reset_ordered_lists(doc)
     try:
         body = convert_doc(doc, "typst")

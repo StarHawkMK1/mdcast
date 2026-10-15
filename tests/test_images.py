@@ -5,7 +5,8 @@ from dataclasses import replace
 
 import docx
 import panflute as pf
-from helpers import build, make_reference_docx, tiny_png
+import pytest
+from helpers import build, make_reference_docx, tiny_bmp, tiny_jpeg, tiny_png
 
 from mdcast.report import Codes
 from mdcast.types import Format
@@ -157,3 +158,98 @@ def test_reachable_remote_image_is_downloaded(tmp_path):
 
     with serve(body) as base:
         assert failed_codes(tmp_path, base + "/a.png") == (["assets/img1.png"], [])
+
+
+def localized(tmp_path, name, data, md=None):
+    (tmp_path / name).write_bytes(data)
+    doc, ctx = build(tmp_path, md or f"앞 ![그림]({name}) 뒤\n", Format.DOCX)
+    return localize_images(doc, ctx), ctx
+
+
+def test_png_bytes_named_jpg_are_saved_as_png(tmp_path):
+    doc, ctx = localized(tmp_path, "photo.jpg", tiny_png())
+    assert images(doc) == ["assets/img1.png"]
+    assert ctx.report.events == []
+
+
+def test_extensionless_jpeg_is_saved_as_jpg(tmp_path):
+    doc, ctx = localized(tmp_path, "photo", tiny_jpeg())
+    assert images(doc) == ["assets/img1.jpg"]
+    assert (ctx.work_dir / "assets" / "img1.jpg").read_bytes() == tiny_jpeg()
+
+
+def test_sniffs_gif_webp_and_svg(tmp_path):
+    svg = b'\xef\xbb\xbf<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>'
+    (tmp_path / "a.bin").write_bytes(b"GIF89a" + bytes(20))
+    (tmp_path / "b.bin").write_bytes(b"RIFF\x10\x00\x00\x00WEBPVP8 " + bytes(8))
+    doc, _ = localized(tmp_path, "c.bin", svg, "![a](a.bin) ![b](b.bin) ![c](c.bin)\n")
+    assert images(doc) == ["assets/img1.gif", "assets/img2.webp", "assets/img3.svg"]
+
+
+def corrupt_png() -> bytes:
+    data = bytearray(tiny_png())
+    data[20] ^= 0xFF  # inside IHDR: its CRC no longer matches
+    return bytes(data)
+
+
+@pytest.mark.parametrize(
+    ("name", "data", "reason"),
+    [
+        ("pic.bmp", tiny_bmp(), "지원하지 않는 이미지 형식"),
+        ("cut.png", tiny_png()[:30], "손상"),
+        ("crc.png", corrupt_png(), "손상"),
+        ("empty.png", b"", "지원하지 않는 이미지 형식"),
+    ],
+)
+def test_unsupported_or_broken_image_becomes_placeholder(tmp_path, name, data, reason):
+    doc, ctx = localized(tmp_path, name, data)
+    assert images(doc) == []
+    assert "[이미지: 그림]" in pf.stringify(doc)
+    [event] = ctx.report.events
+    assert event.code == Codes.IMAGE_FETCH_FAILED and reason in event.message
+
+
+def test_remote_extensionless_jpeg_is_saved_as_jpg(tmp_path):
+    def body(h):
+        h.send_response(200)
+        h.send_header("Content-Length", str(len(tiny_jpeg())))
+        h.end_headers()
+        h.wfile.write(tiny_jpeg())
+
+    with serve(body) as base:
+        assert failed_codes(tmp_path, base + "/photo") == (["assets/img1.jpg"], [])
+
+
+def figures(doc):
+    found = []
+    doc.walk(lambda e, d: found.append(e) if isinstance(e, pf.Figure) else None)
+    return found
+
+
+@pytest.mark.parametrize("url", ["none.png", "data:image/png;base64,iVBORw0KGgo="])
+def test_failed_figure_image_replaces_whole_figure_keeping_caption(tmp_path, url):
+    doc, ctx = build(tmp_path, f"앞 문단\n\n![그림 설명]({url})\n\n뒤 문단\n", Format.DOCX)
+    [figure] = figures(doc)
+    caption = pf.stringify(figure.caption).strip()
+    doc = localize_images(doc, ctx)
+    assert figures(doc) == []
+    assert [type(b) for b in doc.content] == [pf.Para, pf.Para, pf.Para]
+    text = pf.stringify(doc.content[1])
+    assert "[이미지: 그림 설명]" in text and caption in text
+    assert [e.code for e in ctx.report.events] == [Codes.IMAGE_FETCH_FAILED]
+
+
+def test_working_figure_is_kept(tmp_path):
+    (tmp_path / "a.png").write_bytes(tiny_png())
+    doc, ctx = build(tmp_path, "![그림 설명](a.png)\n", Format.DOCX)
+    doc = localize_images(doc, ctx)
+    assert len(figures(doc)) == 1 and images(doc) == ["assets/img1.png"]
+
+
+def test_check_hook_rejection_becomes_placeholder(tmp_path):
+    (tmp_path / "a.png").write_bytes(tiny_png())
+    doc, ctx = build(tmp_path, "앞 ![그림](a.png) 뒤\n", Format.PDF)
+    doc = localize_images(doc, ctx, check=lambda path: f"읽을 수 없음 {path}")
+    assert images(doc) == []
+    [event] = ctx.report.events
+    assert event.code == Codes.IMAGE_FETCH_FAILED and "읽을 수 없음 assets/img1.png" in event.message

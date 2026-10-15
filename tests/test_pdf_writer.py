@@ -118,3 +118,11 @@ def test_long_table_breaks_across_pages_with_repeated_header(tmp_path, width):
     assert "항목" in texts[1]
     for i in range(1, 121):
         assert sum(f"행{i:03d}" in t for t in texts) == 1, i
+
+
+def test_image_typst_cannot_decode_becomes_placeholder(tmp_path):
+    (tmp_path / "odd.jpg").write_bytes(b"\xff\xd8\xff\xe0" + bytes(64))
+    data, ctx = render(tmp_path, "앞 ![이상한 그림](odd.jpg) 뒤\n")
+    assert "[이미지: 이상한 그림]" in norm(pages_text(data)[0])
+    events = [(e.code, e.where.get("format")) for e in ctx.report.events if e.code != Codes.FIELD_EMPTY]
+    assert events == [(Codes.IMAGE_FETCH_FAILED, "pdf")]

@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pypdfium2 as pdfium
 import pytest
+from helpers import tiny_bmp, tiny_jpeg, tiny_png
 
 from mdcast import pipeline
 from mdcast.report import Codes, Level
@@ -92,9 +93,18 @@ def _long_table(rows: int = 120) -> str:
     return "| 번호 | 항목 |\n|---|---|\n" + "".join(f"| {i} | 행{i:03d} |\n" for i in range(1, rows + 1))
 
 
+def _images_md(name: str) -> str:
+    """The same picture inline and as a captioned figure, next to a table."""
+    return f"앞 문단 ![작은 그림]({name})\n\n![그림 설명]({name})\n\n| a |\n|---|\n| 1 |\n\n뒤 문단\n"
+
+
 # case -> (markdown, extra files in the document folder, expected code or None, texts the PDF must contain)
 CONTENT_CASES = {
     "table-longer-than-a-page": ("# 표\n\n" + _long_table() + "\n끝 문단\n", {}, None, ["행001", "행120", "끝 문단"]),
+    "bmp-image": (_images_md("pic.bmp"), {"pic.bmp": tiny_bmp()}, Codes.IMAGE_FETCH_FAILED, ["앞 문단", "뒤 문단"]),
+    "truncated-png": (_images_md("cut.png"), {"cut.png": tiny_png()[:30]}, Codes.IMAGE_FETCH_FAILED, ["뒤 문단"]),
+    "png-named-jpg": (_images_md("photo.jpg"), {"photo.jpg": tiny_png()}, None, ["앞 문단", "뒤 문단"]),
+    "extensionless-jpeg": (_images_md("photo"), {"photo": tiny_jpeg()}, None, ["앞 문단", "뒤 문단"]),
 }
 
 
