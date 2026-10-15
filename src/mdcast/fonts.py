@@ -51,6 +51,10 @@ def font_paths() -> list[str]:
     return [str(BUNDLED_FONT_DIR)] if BUNDLED_FONT_DIR.is_dir() else []
 
 
+def _typst_string(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def missing_primary_fonts(fonts_cfg: dict) -> list[str]:
     import typst
 
@@ -60,10 +64,20 @@ def missing_primary_fonts(fonts_cfg: dict) -> list[str]:
             family = (font or {}).get("family")
             if not family or family in missing:
                 continue
-            latin = latin_name(str(family)).replace('"', "")
+            latin = latin_name(str(family))
+            # A family name with control characters can never be a real font.
+            if any(ord(ch) < 32 or ord(ch) == 127 for ch in latin):
+                missing.append(str(family))
+                continue
             src = Path(tmp) / f"{role}.typ"
-            src.write_text(f'#set text(font: "{latin}")\n가', encoding="utf-8")
-            _, warnings = typst.compile_with_warnings(str(src), root=tmp, font_paths=font_paths())
+            src.write_text(f"#set text(font: {_typst_string(latin)})\n가", encoding="utf-8")
+            try:
+                _, warnings = typst.compile_with_warnings(
+                    str(src), root=tmp, font_paths=font_paths()
+                )
+            except typst.TypstError:  # a template problem must never abort conversion
+                missing.append(str(family))
+                continue
             if any(unknown_font_name(w.message) == latin.lower() for w in warnings):
                 missing.append(str(family))
     return missing
