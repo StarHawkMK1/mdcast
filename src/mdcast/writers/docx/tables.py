@@ -151,7 +151,7 @@ def apply_tables(
     tables = list(d.element.body.iter(qn("w:tbl")))
     if len(tables) != len(records):
         report.warn(
-            Codes.STYLE_UNMAPPED,
+            Codes.RENDER_WARNING,
             f"문서의 표 {len(tables)}개와 변환 기록 {len(records)}개가 맞지 않아 표 종류·머리글 반복을 적용하지 않습니다",
             format="docx",
             element="table",

@@ -16,6 +16,17 @@ from mdcast.writers.docx.styles import apply_elements, apply_page, remap_styles
 from mdcast.writers.docx.tables import apply_tables
 from mdcast.writers.images import localize_images
 
+# pandoc would typeset these as Title/Subtitle/Author/Date/Abstract paragraphs at the top of the
+# body, outside the template's looks and absent from the PDF (spec 0.4, 1.2). They stay available
+# as fields; the core properties are written from the fields by apply_metadata.
+TITLE_BLOCK_KEYS = ("title", "subtitle", "author", "date", "abstract")
+
+
+def _drop_title_block(doc: pf.Doc) -> None:
+    for key in TITLE_BLOCK_KEYS:
+        if key in doc.metadata:
+            del doc.metadata[key]
+
 
 def _pandoc_docx(doc: pf.Doc, ctx: WriterContext, reference: Path | None):
     out = ctx.work_dir / "out.docx"
@@ -49,6 +60,7 @@ def _open_output(doc: pf.Doc, ctx: WriterContext):
 
 def write_docx(doc: pf.Doc, ctx: WriterContext) -> bytes:
     doc = localize_images(doc, ctx)
+    _drop_title_block(doc)
     d, container_source = _open_output(doc, ctx)
     config = ctx.template.config
     # a custom container's own style values beat the built-in default (spec 3.3):

@@ -110,6 +110,19 @@ def test_metadata_records_generator_and_title(tmp_path):
     assert json.loads(props.comments)["template"]["name"] == "default"
 
 
+def test_frontmatter_does_not_add_a_title_block_to_the_body(tmp_path):
+    md = "---\ntitle: 사업계획\nsubtitle: 부제\nauthor: 기획팀\ndate: 2026-10-15\nabstract: 요약\n---\n\n본문\n"
+    data = render(tmp_path, md)
+    d = docx.Document(io.BytesIO(data))
+    assert [p.text for p in d.paragraphs] == ["본문"]
+    body_styles = {p.style.name for p in d.paragraphs}
+    assert not body_styles & {"Title", "Subtitle", "Author", "Date", "Abstract"}
+    assert d.core_properties.title == "사업계획"
+    assert d.core_properties.author == "기획팀"
+    # the values stay usable as header/footer fields
+    assert "사업계획" in "".join(p.text for p in d.sections[0].header.paragraphs)
+
+
 def test_custom_properties_part_has_template_name(tmp_path):
     data = render(tmp_path, "본문\n")
     archive = zipfile.ZipFile(io.BytesIO(data))
@@ -219,7 +232,7 @@ def test_record_count_mismatch_applies_no_variants_and_warns(tmp_path):
     apply_tables(d, ctx.template.config, None, [{"variant": "plain", "head_rows": 1}], report)
     ids = [t.find(qn("w:tblPr")).find(qn("w:tblStyle")).get(qn("w:val")) for t in d.element.body.iter(qn("w:tbl"))]
     assert ids == ["Table", "Table"]
-    assert len(report.events) == 1 and report.events[0].where.get("format") == "docx"
+    assert [(e.code, e.where.get("format")) for e in report.events] == [(Codes.RENDER_WARNING, "docx")]
     assert not any(st.style_id.startswith("MdcastTable") for st in d.styles)
 
 

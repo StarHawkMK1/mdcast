@@ -91,4 +91,7 @@ def apply_metadata(d, generator: dict[str, Any], fields: ResolvedFields, report:
     title = fields.values.get("title")
     if title:
         props.title = title
+    author = fields.values.get("author")
+    if author:
+        props.author = author
     _write_custom_properties(d, _custom_values(generator), report)
