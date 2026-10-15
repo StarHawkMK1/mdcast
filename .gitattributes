@@ -1,0 +1,7 @@
+* text=auto eol=lf
+*.png binary
+*.ttf binary
+*.docx binary
+*.pdf binary
+*.hwpx binary
+tests/fixtures/md/edge-cases.md -text

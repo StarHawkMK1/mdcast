@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mdcast"
+version = "0.1.0.dev0"
+description = "Markdown ↔ docx · hwpx · pdf, 템플릿 기반 변환기"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+  "pypandoc-binary==1.17",
+  "panflute==2.3.1",
+  "typst==0.15.0",
+  "python-docx==1.2.0",
+  "lxml>=5.2",
+  "PyYAML>=6.0",
+  "click>=8.1",
+]
+
+[project.scripts]
+mdcast = "mdcast.cli:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "pypdfium2>=4.30",
+  "pillow>=10",
+  "ruff>=0.6",
+  "pywin32>=306; sys_platform == 'win32'",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mdcast"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::SyntaxWarning"]
+markers = [
+  "visual: page-image comparison against tests/golden (run with --run-visual)",
+  "hangul: needs Hancom Office via COM (local Windows only)",
+]
+
+[tool.ruff]
+line-length = 100
