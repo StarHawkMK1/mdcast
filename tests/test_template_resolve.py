@@ -213,3 +213,22 @@ def test_builtin_container_ignores_custom_files(tmp_path):
     assert tpl.builtin_container("hwpx") == tpl.builtin_container("docx")
     pdf = tpl.builtin_container("pdf")
     assert pdf.source == "builtin" and pdf.path.name == "pdf.typ" and pdf.path.is_file()
+
+
+def test_explicit_omits_invalid_value_replaced_by_builtin_default(tmp_path):
+    write_template(
+        project_dir(tmp_path), "solo", "name: solo\nelements: {body: {size: banana}}\n"
+    )
+    tpl, r = resolve("solo", tmp_path)
+    assert tpl.config["elements"]["body"]["size"] == "11pt"
+    assert "elements" not in tpl.explicit
+    assert codes(r) == [Codes.TEMPLATE_INVALID]
+
+
+def test_explicit_omits_invalid_parent_value_when_child_silent(tmp_path):
+    write_template(
+        project_dir(tmp_path), "base", "name: base\nelements: {body: {size: banana}}\n"
+    )
+    write_template(project_dir(tmp_path), "child", "name: child\nextends: base\n")
+    tpl, _ = resolve("child", tmp_path)
+    assert "elements" not in tpl.explicit

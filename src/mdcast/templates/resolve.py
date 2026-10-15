@@ -138,17 +138,26 @@ def _container(fmt: str, config: dict[str, Any], dirs: list[tuple[Path, str]]) -
     return Container(None, "builtin")
 
 
-def _explicit_values(raw: dict[str, Any], final: dict[str, Any]) -> dict[str, Any]:
-    """Keys present in the yaml ``raw``, with values read from the sanitized ``final``."""
+def _explicit_values(
+    user: dict[str, Any], parent: dict[str, Any], final: dict[str, Any]
+) -> dict[str, Any]:
+    """Keys whose final value really came from the child or parent yaml.
+
+    A leaf counts only if the sanitized ``final`` value equals what the child or the parent
+    wrote; a value sanitize replaced with the built-in default is not explicit.
+    """
     out: dict[str, Any] = {}
-    for key, value in raw.items():
+    for key in [*user, *(k for k in parent if k not in user)]:
         if key not in final:
             continue
-        if isinstance(value, dict) and isinstance(final[key], dict):
-            nested = _explicit_values(value, final[key])
-            if nested or not value:
+        u, p = user.get(key), parent.get(key)
+        if isinstance(final[key], dict) and (isinstance(u, dict) or isinstance(p, dict)):
+            nested = _explicit_values(
+                u if isinstance(u, dict) else {}, p if isinstance(p, dict) else {}, final[key]
+            )
+            if nested or u == {} or p == {}:
                 out[key] = nested
-        else:
+        elif (key in user and final[key] == u) or (key in parent and final[key] == p):
             out[key] = final[key]
     return out
 
@@ -212,7 +221,7 @@ def resolve_template(
     parent_clean = sanitize(deep_merge(default_cfg, parent_cfg), default_cfg, report)
     config = sanitize(deep_merge(parent_clean, user_cfg), parent_clean, report)
 
-    explicit = _explicit_values(deep_merge(parent_cfg, user_cfg), config)
+    explicit = _explicit_values(user_cfg, parent_cfg, config)
     for key in METADATA_KEYS:
         explicit.pop(key, None)
 
