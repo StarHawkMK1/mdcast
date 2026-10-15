@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
@@ -118,3 +119,41 @@ def test_help_and_version_survive_piped_legacy_console():
         proc = subprocess.run([sys.executable, "-m", "mdcast", *args], capture_output=True, env=clean, timeout=60, check=False)
         assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
         assert expected in proc.stdout.decode("utf-8")
+
+
+def test_output_write_failure_exits_1_and_reports(env, monkeypatch):
+    md = write_md(env)
+    real = Path.write_bytes
+
+    def flaky(self, data):
+        if self.name == "보고 서.docx":
+            raise PermissionError("denied")
+        return real(self, data)
+
+    monkeypatch.setattr(Path, "write_bytes", flaky)
+    human = run("convert", str(md), "--to", "docx,pdf", "--offline")
+    assert human.exit_code == 1
+    assert "✖ 보고 서.docx" in human.output
+    assert not (env / "보고 서.docx").exists() and (env / "보고 서.pdf").is_file()
+    data = json.loads(run("convert", str(md), "--to", "docx", "--json").output)
+    assert data["outputs"][0]["status"] == "failed"
+    assert any(e["code"] == "OUTPUT_WRITE_FAILED" and e["level"] == "error" for e in data["events"])
+
+
+def test_out_dir_under_regular_file_fails_cleanly(env):
+    blocker = env / "파일"
+    blocker.write_text("x", encoding="utf-8")
+    r = run("convert", str(write_md(env)), "--out-dir", str(blocker / "sub"))
+    assert r.exit_code == 1 and "✖" in r.output
+
+
+def test_unreadable_input_is_korean_error(env, monkeypatch):
+    md = write_md(env)
+
+    def deny(self):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(Path, "read_bytes", deny)
+    r = run("convert", str(md))
+    assert r.exit_code == 1
+    assert "입력 파일을 읽지 못했습니다" in r.output and "Traceback" not in r.output

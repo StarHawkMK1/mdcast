@@ -101,7 +101,12 @@ def convert(input_path, to, template, out_dir, as_json, verbose, quiet, keep_tem
         raise click.UsageError(f"지원하지 않는 형식입니다: {exc}") from exc
     if not targets:
         raise click.UsageError("--to 에 출력 포맷을 지정하세요")
-    source = Source(input_path.read_bytes(), input_path.name, source_format, base_dir=input_path.parent.resolve())
+    try:
+        data = input_path.read_bytes()
+    except OSError as exc:
+        click.echo(f"✖ 입력 파일을 읽지 못했습니다: {exc}", err=True)
+        sys.exit(1)
+    source = Source(data, input_path.name, source_format, base_dir=input_path.parent.resolve())
     options = Options(offline=offline, keep_temp=keep_temp, cwd=Path.cwd(), home=Path.home())
     try:
         result = pipeline.convert(source, targets, template, options)
