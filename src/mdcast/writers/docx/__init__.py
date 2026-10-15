@@ -61,7 +61,7 @@ def write_docx(doc: pf.Doc, ctx: WriterContext) -> bytes:
     apply_list_numbering(d, config)
     explicit_tables = ctx.template.explicit if container_source == "custom" else None
     apply_tables(d, config, explicit_tables, ctx.state.get("tables", []), ctx.report)
-    apply_metadata(d, ctx.generator, ctx.fields)
+    apply_metadata(d, ctx.generator, ctx.fields, ctx.report)
     buffer = io.BytesIO()
     d.save(buffer)
     return buffer.getvalue()

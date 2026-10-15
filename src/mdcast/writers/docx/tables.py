@@ -160,7 +160,17 @@ def apply_tables(
         style_ids[variant] = style_id
 
     # body pre-order, matching the filter's records (footnote tables are not in the body)
-    for tbl, record in zip(d.element.body.iter(qn("w:tbl")), records):
+    tables = list(d.element.body.iter(qn("w:tbl")))
+    if len(tables) != len(records):
+        report.warn(
+            Codes.STYLE_UNMAPPED,
+            f"문서의 표 {len(tables)}개와 변환 기록 {len(records)}개가 맞지 않아 표 종류·머리글 반복을 적용하지 않습니다",
+            format="docx",
+            element="table",
+        )
+        records = [{"variant": None, "head_rows": 0} for _ in tables]
+    for tbl, record in zip(tables, records):
+        # width and header repeat are per-table content features: read from the full config (I2 decision)
         s = table_settings(config, record["variant"])
         look = style_look(record["variant"])
         tblpr = tbl.find(qn("w:tblPr"))

@@ -9,6 +9,7 @@ from docx.opc.part import Part
 from lxml import etree
 
 from mdcast.fields import ResolvedFields
+from mdcast.report import Codes, Report
 
 CUSTOM_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.custom-properties+xml"
 _NS_CP = "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties"
@@ -32,8 +33,18 @@ def _custom_values(generator: dict[str, Any]) -> dict[str, str]:
     return {k: str(v) for k, v in values.items() if v not in (None, "")}
 
 
+def _parse(blob: bytes):
+    parser = etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=False)
+    root = etree.fromstring(blob, parser)
+    if root.tag != f"{{{_NS_CP}}}Properties":
+        raise etree.XMLSyntaxError("not a custom-properties part", 0, 0, 0)
+    return root
+
+
 def _merge_custom(blob: bytes | None, values: dict[str, str]) -> bytes:
-    root = etree.fromstring(blob) if blob else etree.Element(f"{{{_NS_CP}}}Properties", nsmap={None: _NS_CP, "vt": _NS_VT})
+    root = _parse(blob) if blob else None
+    if root is None:
+        root = etree.Element(f"{{{_NS_CP}}}Properties", nsmap={None: _NS_CP, "vt": _NS_VT})
     props = root.findall(f"{{{_NS_CP}}}property")
     for prop in list(props):
         if prop.get("name") in values:
@@ -47,23 +58,34 @@ def _merge_custom(blob: bytes | None, values: dict[str, str]) -> bytes:
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
 
 
-def _write_custom_properties(d, values: dict[str, str]) -> None:
+def _write_custom_properties(d, values: dict[str, str], report: Report | None) -> None:
     if not values:
         return
     package = d.part.package
     for rel in package.rels.values():
         if rel.reltype == RT.CUSTOM_PROPERTIES and not rel.is_external:
+            try:
+                _parse(rel.target_part.blob)
+            except etree.XMLSyntaxError as exc:
+                if report is not None:
+                    report.warn(
+                        Codes.TEMPLATE_INVALID,
+                        f"기준 문서의 사용자 지정 속성(custom.xml)을 읽을 수 없어 새로 만듭니다: {exc}",
+                        format="docx",
+                    )
+                rel.target_part._blob = _merge_custom(None, values)
+                return
             rel.target_part._blob = _merge_custom(rel.target_part.blob, values)
             return
     part = Part(PackURI("/docProps/custom.xml"), CUSTOM_CONTENT_TYPE, _merge_custom(None, values), package)
     package.relate_to(part, RT.CUSTOM_PROPERTIES)
 
 
-def apply_metadata(d, generator: dict[str, Any], fields: ResolvedFields) -> None:
+def apply_metadata(d, generator: dict[str, Any], fields: ResolvedFields, report: Report | None = None) -> None:
     props = d.core_properties
     props.comments = json.dumps(generator, ensure_ascii=False)
     props.keywords = "mdcast"
     title = fields.values.get("title")
     if title:
         props.title = title
-    _write_custom_properties(d, _custom_values(generator))
+    _write_custom_properties(d, _custom_values(generator), report)

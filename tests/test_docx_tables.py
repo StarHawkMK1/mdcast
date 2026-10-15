@@ -7,6 +7,7 @@ from docx.oxml.ns import qn
 from helpers import build, make_reference_docx, write_template
 from lxml import etree
 
+from mdcast.report import Codes, Report
 from mdcast.types import Format
 from mdcast.writers.docx import write_docx
 
@@ -120,3 +121,84 @@ def test_custom_properties_part_has_template_name(tmp_path):
     assert min(int(p.get("pid")) for p in root.findall("cp:property", ns)) == 2
     assert "custom.xml" in archive.read("[Content_Types].xml").decode()
     assert "custom-properties" in archive.read("_rels/.rels").decode()
+
+
+CP = "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties"
+VT = "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"
+
+
+def add_custom_xml(path, blob: bytes) -> None:
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
+    from docx.opc.packuri import PackURI
+    from docx.opc.part import Part
+
+    reference = docx.Document(str(path))
+    package = reference.part.package
+    for rel in package.rels.values():
+        if rel.reltype == RT.CUSTOM_PROPERTIES:
+            rel.target_part._blob = blob
+            reference.save(str(path))
+            return
+    part_ = Part(PackURI("/docProps/custom.xml"), "application/vnd.openxmlformats-officedocument.custom-properties+xml", blob, package)
+    package.relate_to(part_, RT.CUSTOM_PROPERTIES)
+    reference.save(str(path))
+
+
+def custom_values(data: bytes) -> dict[str, str]:
+    root = part(data, "docProps/custom.xml")
+    return {p.get("name"): p[0].text for p in root.findall(f"{{{CP}}}property")}
+
+
+def seeded_document(tmp_path, blob: bytes):
+    # pandoc does not carry a reference.docx's custom.xml into its output, so seed the finished document
+    path = tmp_path / "seed.docx"
+    docx.Document().save(str(path))
+    add_custom_xml(path, blob)
+    return docx.Document(str(path))
+
+
+def apply_to(d, report):
+    from mdcast.fields import ResolvedFields
+    from mdcast.writers.docx.meta import apply_metadata
+
+    generator = {"generator": "mdcast test", "pandoc": "3.9", "template": {"name": "t"}}
+    apply_metadata(d, generator, ResolvedFields({}, report), report)
+    buffer = io.BytesIO()
+    d.save(buffer)
+    return buffer.getvalue()
+
+
+def test_custom_properties_merge_keeps_foreign_and_replaces_ours(tmp_path):
+    blob = (
+        f'<Properties xmlns="{CP}" xmlns:vt="{VT}">'
+        '<property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="Company"><vt:lpwstr>ACME</vt:lpwstr></property>'
+        '<property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="3" name="mdcast.pandoc"><vt:lpwstr>stale</vt:lpwstr></property>'
+        "</Properties>"
+    ).encode()
+    data = apply_to(seeded_document(tmp_path, blob), Report("doc.md", Format.MD))
+    values = custom_values(data)
+    assert values["Company"] == "ACME"
+    assert values["mdcast.template.name"] == "t"
+    assert values["mdcast.pandoc"] == "3.9"
+    assert len(zipfile.ZipFile(io.BytesIO(data)).namelist()) == len(set(zipfile.ZipFile(io.BytesIO(data)).namelist()))
+
+
+def test_malformed_custom_xml_is_replaced_with_warning(tmp_path):
+    report = Report("doc.md", Format.MD)
+    data = apply_to(seeded_document(tmp_path, b"<Properties><oops"), report)
+    assert custom_values(data)["mdcast.template.name"] == "t"
+    assert [(e.code, e.where.get("format")) for e in report.events] == [(Codes.TEMPLATE_INVALID, "docx")]
+
+
+def test_record_count_mismatch_applies_no_variants_and_warns(tmp_path):
+    from mdcast.writers.docx.tables import apply_tables
+
+    tpl = write_template(tmp_path, "t", VARIANT_TPL)
+    md = "| a |\n|---|\n| 1 |\n\n| b |\n|---|\n| 2 |\n"
+    doc, ctx = build(tmp_path, md, Format.DOCX, template=str(tpl))
+    d = docx.Document(io.BytesIO(write_docx(doc, ctx)))
+    report = Report("doc.md", Format.MD)
+    apply_tables(d, ctx.template.config, None, [{"variant": "plain", "head_rows": 1}], report)
+    ids = [t.find(qn("w:tblPr")).find(qn("w:tblStyle")).get(qn("w:val")) for t in d.element.body.iter(qn("w:tbl"))]
+    assert ids == ["Table", "Table"]
+    assert len(report.events) == 1 and report.events[0].where.get("format") == "docx"
