@@ -5,6 +5,7 @@ from typing import Any
 
 import panflute as pf
 
+from mdcast.filters._raw import raw_block
 from mdcast.filters.context import FilterContext
 from mdcast.report import Codes
 from mdcast.types import Format
@@ -18,19 +19,12 @@ def is_marker(elem: pf.Element) -> bool:
     return isinstance(elem, pf.RawBlock) and elem.format == "html" and bool(_MARKER.match(elem.text))
 
 
-def _raw(text: str, fmt: str) -> pf.RawBlock:
-    # panflute 2.3.1 rejects "typst" in the constructor, so the format is set after construction.
-    block = pf.RawBlock(text, format="html")
-    block.format = fmt
-    return block
-
-
 def break_block(target: Format) -> pf.RawBlock:
     if target is Format.DOCX:
-        return _raw('<w:p><w:r><w:br w:type="page"/></w:r></w:p>', "openxml")
+        return raw_block('<w:p><w:r><w:br w:type="page"/></w:r></w:p>', "openxml")
     if target is Format.PDF:
-        return _raw("#pagebreak()", "typst")
-    return _raw("<!-- pagebreak -->", "html")
+        return raw_block("#pagebreak()", "typst")
+    return raw_block("<!-- pagebreak -->", "html")
 
 
 def _is_break(elem: pf.Element, target: Format) -> bool:

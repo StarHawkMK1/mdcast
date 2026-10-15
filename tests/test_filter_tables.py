@@ -87,5 +87,20 @@ def test_footnote_tables_are_not_collected():
         "text[^1]\n\n[^1]: note\n\n    | f |\n    |---|\n    | 9 |\n\n"
         "<!-- table: plain -->\n\n| b |\n|---|\n| 2 |\n"
     )
-    _, ctx = run(md, overrides=VARIANTS)
+    doc, ctx = run(md, overrides=VARIANTS)
     assert ctx.state["tables"] == [{"variant": "plain", "head_rows": 1}]
+    note_table = next(e for e in _all(doc) if isinstance(e, pf.Table) and tables._in_footnote(e))
+    assert isinstance(note_table.head.content[0].content[0].content[0].content[0], pf.Strong)
+
+
+def _all(doc):
+    found = []
+    doc.walk(lambda e, _d: found.append(e))
+    return found
+
+
+def test_second_marker_reports_the_unattached_first():
+    md = "<!-- table: plain -->\n\n<!-- table: other -->\n\n| a |\n|---|\n| 1 |\n"
+    _, ctx = run(md, overrides=VARIANTS)
+    codes = [(e.code, e.where.get("variant")) for e in ctx.report.events]
+    assert codes[0] == (Codes.TABLE_VARIANT_UNKNOWN, "plain")

@@ -5,6 +5,7 @@ from typing import Any
 
 import panflute as pf
 
+from mdcast.filters._raw import raw_block
 from mdcast.filters.context import FilterContext
 from mdcast.report import Codes
 from mdcast.templates.schema import deep_merge
@@ -52,13 +53,6 @@ def _style(table: pf.Table, settings: dict[str, Any]) -> None:
                     _embolden(row.content[0])
 
 
-def _typst(text: str) -> pf.RawBlock:
-    # panflute 2.3.1 rejects "typst" in the constructor, so the format is set after construction.
-    block = pf.RawBlock(text, format="html")
-    block.format = "typst"
-    return block
-
-
 def _in_footnote(elem: pf.Element) -> bool:
     parent = elem.parent
     while parent is not None:
@@ -89,6 +83,8 @@ def apply(doc: pf.Doc, ctx: FilterContext) -> pf.Doc:
     for block in doc.content:
         marker = _variant_marker(block)
         if marker is not None:
+            if pending is not None:
+                _drop_pending(ctx, pending)
             pending = marker
             continue
         if isinstance(block, pf.Table):
@@ -103,9 +99,9 @@ def apply(doc: pf.Doc, ctx: FilterContext) -> pf.Doc:
             variant_of[id(block)] = variant
             head_rows = len(block.head.content)
             if ctx.target is Format.PDF:
-                out.append(_typst(f'#mdcast-table(cfg, "{variant or "_default"}", {head_rows})['))
+                out.append(raw_block(f'#mdcast-table(cfg, "{variant or "_default"}", {head_rows})[', "typst"))
                 out.append(block)
-                out.append(_typst("]"))
+                out.append(raw_block("]", "typst"))
                 continue
         elif pending is not None:
             _drop_pending(ctx, pending)
@@ -120,10 +116,11 @@ def apply(doc: pf.Doc, ctx: FilterContext) -> pf.Doc:
 
     def collect(elem: pf.Element, _doc: pf.Doc):
         if isinstance(elem, pf.Table):
-            if _in_footnote(elem):
-                return  # footnote tables go to footnotes.xml: no variant, not collected
             if id(elem) not in variant_of:
                 _style(elem, default_settings)
+            if _in_footnote(elem):
+                return  # footnote tables go to footnotes.xml: styled by default, but not collected
+            # Known limitation: a table inside a table cell is recorded post-order (inner first), docx is pre-order.
             records.append({"variant": variant_of.get(id(elem)), "head_rows": len(elem.head.content)})
 
     doc.walk(collect)
