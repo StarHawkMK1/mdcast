@@ -246,3 +246,15 @@ def test_failed_figure_image_keeps_table_variants(tmp_path, url):
     codes = [e.code for e in ctx.report.events]
     assert Codes.IMAGE_FETCH_FAILED in codes
     assert Codes.STYLE_UNMAPPED not in codes and Codes.RENDER_WARNING not in codes
+
+
+def test_failed_figure_with_id_adds_no_table_and_keeps_bookmark(tmp_path):
+    tpl = write_template(tmp_path, "t", VARIANT_TPL)
+    md = "![없는 그림](none.png){#fig-a}\n\n[참조](#fig-a)\n\n<!-- table: plain -->\n\n| a |\n|---|\n| 1 |\n"
+    doc, ctx = build(tmp_path, md, Format.DOCX, template=str(tpl))
+    data = write_docx(doc, ctx)
+    assert table_style_ids(data) == ["MdcastTable1"]
+    body = part(data, "word/document.xml")
+    assert "fig-a" in [b.get(qn("w:name")) for b in body.iter(qn("w:bookmarkStart"))]
+    codes = [e.code for e in ctx.report.events]
+    assert Codes.STYLE_UNMAPPED not in codes and Codes.RENDER_WARNING not in codes

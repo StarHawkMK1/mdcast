@@ -126,3 +126,15 @@ def test_image_typst_cannot_decode_becomes_placeholder(tmp_path):
     assert "[이미지: 이상한 그림]" in norm(pages_text(data)[0])
     events = [(e.code, e.where.get("format")) for e in ctx.report.events if e.code != Codes.FIELD_EMPTY]
     assert events == [(Codes.IMAGE_FETCH_FAILED, "pdf")]
+
+
+def test_label_of_a_figure_that_lost_its_image_survives(tmp_path):
+    from helpers import tiny_bmp
+
+    (tmp_path / "pic.bmp").write_bytes(tiny_bmp())
+    md = "![그림 설명](pic.bmp){#fig-a}\n\n[그림 참조](#fig-a)\n"
+    data, ctx = render(tmp_path, md)
+    text = norm(pages_text(data)[0])
+    assert "[이미지: 그림 설명]" in text and "그림 참조" in text
+    assert "<fig-a>" in (ctx.work_dir / "main.typ").read_text(encoding="utf-8")
+    assert Codes.IMAGE_FETCH_FAILED in [e.code for e in ctx.report.events]

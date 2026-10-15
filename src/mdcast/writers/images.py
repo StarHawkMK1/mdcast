@@ -189,7 +189,9 @@ def localize_images(
         caption = _caption_inlines(figure)
         if caption:
             inlines += [pf.LineBreak(), *caption]
-        return pf.Para(*inlines)
+        para = pf.Para(*inlines)
+        # keep the figure's id, or links/cross-references to it break (Typst: missing label)
+        return pf.Div(para, identifier=figure.identifier) if figure.identifier else para
 
     def action(elem: pf.Element, _doc: pf.Doc):
         if isinstance(elem, pf.Image):

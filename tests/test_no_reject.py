@@ -105,6 +105,12 @@ CONTENT_CASES = {
     "truncated-png": (_images_md("cut.png"), {"cut.png": tiny_png()[:30]}, Codes.IMAGE_FETCH_FAILED, ["뒤 문단"]),
     "png-named-jpg": (_images_md("photo.jpg"), {"photo.jpg": tiny_png()}, None, ["앞 문단", "뒤 문단"]),
     "extensionless-jpeg": (_images_md("photo"), {"photo": tiny_jpeg()}, None, ["앞 문단", "뒤 문단"]),
+    "linked-figure-missing-image": (
+        "![그림 설명](none.png){#fig-a}\n\n[그림 참조](#fig-a)\n\n| a |\n|---|\n| 1 |\n",
+        {},
+        Codes.IMAGE_FETCH_FAILED,
+        ["[이미지: 그림 설명]", "그림 참조"],
+    ),
 }
 
 
