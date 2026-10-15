@@ -186,6 +186,16 @@ def test_sniffs_gif_webp_and_svg(tmp_path):
     assert images(doc) == ["assets/img1.gif", "assets/img2.webp", "assets/img3.svg"]
 
 
+def test_svg_after_declaration_comment_and_doctype_is_accepted(tmp_path):
+    svg = (
+        b'<?xml version="1.0" encoding="UTF-8"?>\n<!-- made by a tool -->\n'
+        b'<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n'
+        b'<SVG xmlns="http://www.w3.org/2000/svg" width="1" height="1"></SVG>'
+    )
+    doc, ctx = localized(tmp_path, "a.svg", svg)
+    assert images(doc) == ["assets/img1.svg"] and ctx.report.events == []
+
+
 def corrupt_png() -> bytes:
     data = bytearray(tiny_png())
     data[20] ^= 0xFF  # inside IHDR: its CRC no longer matches
@@ -199,6 +209,8 @@ def corrupt_png() -> bytes:
         ("cut.png", tiny_png()[:30], "손상"),
         ("crc.png", corrupt_png(), "손상"),
         ("empty.png", b"", "지원하지 않는 이미지 형식"),
+        ("page.svg", b"<!DOCTYPE html>\n<html><body><svg width='1' height='1'></svg></body></html>", "지원하지 않는 이미지 형식"),
+        ("icon.svg", b"<div><svg/></div>", "지원하지 않는 이미지 형식"),
     ],
 )
 def test_unsupported_or_broken_image_becomes_placeholder(tmp_path, name, data, reason):

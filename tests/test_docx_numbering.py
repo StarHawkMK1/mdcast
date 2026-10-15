@@ -63,9 +63,25 @@ def test_bullet_levels_use_template_symbols_and_body_font(tmp_path):
     first = bullets[0]
     assert [t for _, t, _, _ in first[:5]] == ["□", "○", "-", "·", "·"]
     assert first[0][3] == "맑은 고딕"
-    # markers start one indent_per_level (5mm) further per level; the text follows the marker
-    marker_starts = [left - hanging for _, left, hanging in hangings(data)[abstract_levels(data).index(first)][:3]]
-    assert marker_starts == [0, mm_to_twips(5), mm_to_twips(10)]
+    assert_nesting(hangings(data)[abstract_levels(data).index(first)])
+
+
+def assert_nesting(levels, indent_mm: float = 5):
+    """Each marker starts at least one indent_per_level further and never left of its parent's text."""
+    starts = [left - hanging for _, left, hanging in levels]
+    assert starts[0] == 0
+    for n in range(1, len(levels)):
+        assert starts[n] >= mm_to_twips(indent_mm * n) - 1, (n, levels)
+        assert starts[n] >= levels[n - 1][1], (n, levels)
+
+
+def test_nested_markers_start_under_the_parent_text(tmp_path):
+    tpl = write_template(tmp_path, "t", "name: t\nlists: {ordered: ['가.', '(가)', '(1)']}\n")
+    data = render(tmp_path, "1. a\n    1. b\n        1. c\n\n<!-- -->\n\n- x\n    - y\n        - z\n", str(tpl))
+    found = hangings(data)
+    assert len(found) == 2
+    for levels in found:
+        assert_nesting(levels)
 
 
 def test_ordered_levels_use_korean_formats(tmp_path):

@@ -66,7 +66,8 @@ def apply_list_numbering(d, config: dict[str, Any]) -> None:
             continue
         first_fmt = levels[0].find(qn("w:numFmt"))
         is_bullet = first_fmt is not None and first_fmt.get(qn("w:val")) == "bullet"
-        for lvl in levels:
+        parent_text = 0
+        for lvl in sorted(levels, key=lambda el: int(el.get(qn("w:ilvl"), "0"))):
             index = int(lvl.get(qn("w:ilvl"), "0"))
             if is_bullet:
                 symbol = bullets[min(index, len(bullets) - 1)]
@@ -83,7 +84,10 @@ def apply_list_numbering(d, config: dict[str, Any]) -> None:
                 upsert(lvl, "w:numFmt", LVL_ORDER, val=fmt)
                 upsert(lvl, "w:lvlText", LVL_ORDER, val=text)
                 markers = [format_counter(pattern, n) for n in range(1, 11)]
-            # the marker starts one indent_per_level further per level; the text follows the marker
+            # the marker starts one indent_per_level further per level, but never left of the
+            # parent level's text; the text follows the marker
             hanging = _hanging_twips(markers, body_pt)
+            start = max(mm_to_twips(indent * index), parent_text)
+            parent_text = start + hanging
             ppr = upsert(lvl, "w:pPr", LVL_ORDER)
-            upsert(ppr, "w:ind", PPR_ORDER, left=mm_to_twips(indent * index) + hanging, hanging=hanging)
+            upsert(ppr, "w:ind", PPR_ORDER, left=parent_text, hanging=hanging)

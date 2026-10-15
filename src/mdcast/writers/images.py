@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import http.client
 import itertools
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -17,6 +18,12 @@ from mdcast.writers.context import WriterContext
 
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 _CHUNK = 64 * 1024
+# the root element must be <svg> (after an optional BOM, XML declaration, comments and doctype),
+# so an HTML error page that merely contains an inline <svg> icon is not taken for an image
+_SVG_START = re.compile(
+    rb"(?:\xef\xbb\xbf)?\s*(?:<\?xml[^>]*\?>\s*)?(?:(?:<!--.*?-->|<!DOCTYPE\s+svg[^>]*>)\s*)*<svg[\s>/]",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 class _ImageError(Exception):
@@ -103,8 +110,7 @@ def _extension(data: bytes) -> str:
         return ".gif"
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return ".webp"
-    head = data[:4096].lstrip(b"\xef\xbb\xbf \t\r\n")
-    if head.startswith(b"<") and b"<svg" in head.lower():
+    if _SVG_START.match(data[:4096]):
         return ".svg"
     raise _ImageError("지원하지 않는 이미지 형식입니다 (PNG, JPEG, GIF, WebP, SVG 만 지원)")
 
