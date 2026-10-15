@@ -190,6 +190,22 @@ def test_malformed_custom_xml_is_replaced_with_warning(tmp_path):
     assert [(e.code, e.where.get("format")) for e in report.events] == [(Codes.TEMPLATE_INVALID, "docx")]
 
 
+def test_doctype_entity_custom_xml_is_replaced_with_warning(tmp_path):
+    blob = (
+        '<?xml version="1.0"?><!DOCTYPE Properties [<!ENTITY x "boom">]>'
+        f'<Properties xmlns="{CP}" xmlns:vt="{VT}">'
+        '<property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2" name="Company"><vt:lpwstr>&x;</vt:lpwstr></property>'
+        "</Properties>"
+    ).encode()
+    report = Report("doc.md", Format.MD)
+    data = apply_to(seeded_document(tmp_path, blob), report)
+    raw = zipfile.ZipFile(io.BytesIO(data)).read("docProps/custom.xml")
+    root = etree.fromstring(raw, etree.XMLParser(resolve_entities=False, load_dtd=False))
+    assert b"&x;" not in raw and b"DOCTYPE" not in raw and next(root.iter(etree.Entity), None) is None
+    assert custom_values(data)["mdcast.template.name"] == "t"
+    assert [(e.code, e.where.get("format")) for e in report.events] == [(Codes.TEMPLATE_INVALID, "docx")]
+
+
 def test_record_count_mismatch_applies_no_variants_and_warns(tmp_path):
     from mdcast.writers.docx.tables import apply_tables
 
@@ -202,3 +218,4 @@ def test_record_count_mismatch_applies_no_variants_and_warns(tmp_path):
     ids = [t.find(qn("w:tblPr")).find(qn("w:tblStyle")).get(qn("w:val")) for t in d.element.body.iter(qn("w:tbl"))]
     assert ids == ["Table", "Table"]
     assert len(report.events) == 1 and report.events[0].where.get("format") == "docx"
+    assert not any(st.style_id.startswith("MdcastTable") for st in d.styles)

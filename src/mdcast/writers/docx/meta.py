@@ -36,6 +36,9 @@ def _custom_values(generator: dict[str, Any]) -> dict[str, str]:
 def _parse(blob: bytes):
     parser = etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=False)
     root = etree.fromstring(blob, parser)
+    info = root.getroottree().docinfo
+    if info.doctype or info.internalDTD is not None or next(root.iter(etree.Entity), None) is not None:
+        raise etree.XMLSyntaxError("DOCTYPE or entity reference in custom properties", 0, 0, 0)
     if root.tag != f"{{{_NS_CP}}}Properties":
         raise etree.XMLSyntaxError("not a custom-properties part", 0, 0, 0)
     return root

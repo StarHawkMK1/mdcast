@@ -147,6 +147,16 @@ def apply_tables(
 
     _configure_style(base.element, style_look(None))
 
+    # body pre-order, matching the filter's records (footnote tables are not in the body)
+    tables = list(d.element.body.iter(qn("w:tbl")))
+    if len(tables) != len(records):
+        report.warn(
+            Codes.STYLE_UNMAPPED,
+            f"문서의 표 {len(tables)}개와 변환 기록 {len(records)}개가 맞지 않아 표 종류·머리글 반복을 적용하지 않습니다",
+            format="docx",
+            element="table",
+        )
+        records = [{"variant": None, "head_rows": 0} for _ in tables]
     style_ids: dict[str, str] = {}
     for index, variant in enumerate(sorted({r["variant"] for r in records if r["variant"]}), start=1):
         element = copy.deepcopy(base.element)
@@ -159,18 +169,8 @@ def apply_tables(
         _configure_style(element, table_settings(config, variant) if explicit is None else variants.get(variant) or {})
         style_ids[variant] = style_id
 
-    # body pre-order, matching the filter's records (footnote tables are not in the body)
-    tables = list(d.element.body.iter(qn("w:tbl")))
-    if len(tables) != len(records):
-        report.warn(
-            Codes.STYLE_UNMAPPED,
-            f"문서의 표 {len(tables)}개와 변환 기록 {len(records)}개가 맞지 않아 표 종류·머리글 반복을 적용하지 않습니다",
-            format="docx",
-            element="table",
-        )
-        records = [{"variant": None, "head_rows": 0} for _ in tables]
     for tbl, record in zip(tables, records):
-        # width and header repeat are per-table content features: read from the full config (I2 decision)
+        # header repeat follows I2 (per-table content feature); width=full is my judgement call in the same spirit
         s = table_settings(config, record["variant"])
         look = style_look(record["variant"])
         tblpr = tbl.find(qn("w:tblPr"))
