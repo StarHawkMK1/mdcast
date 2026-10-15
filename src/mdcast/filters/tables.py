@@ -1,0 +1,131 @@
+from __future__ import annotations
+
+import re
+from typing import Any
+
+import panflute as pf
+
+from mdcast.filters.context import FilterContext
+from mdcast.report import Codes
+from mdcast.templates.schema import deep_merge
+from mdcast.types import Format
+
+_VARIANT = re.compile(r"^\s*<!--\s*table\s*:\s*([\w\-가-힣]+)\s*-->\s*$", re.IGNORECASE)
+_ALIGN = {"left": "AlignLeft", "center": "AlignCenter", "right": "AlignRight"}
+
+
+def table_settings(config: dict[str, Any], variant: str | None) -> dict[str, Any]:
+    base = {k: v for k, v in config["tables"].items() if k != "variants"}
+    overrides = (config["tables"].get("variants") or {}).get(variant) if variant else None
+    return deep_merge(base, overrides) if overrides else base
+
+
+def _embolden(cell: pf.TableCell) -> None:
+    for block in cell.content:
+        if isinstance(block, (pf.Plain, pf.Para)) and block.content:
+            inlines = list(block.content)
+            if len(inlines) == 1 and isinstance(inlines[0], pf.Strong):
+                continue
+            block.content = [pf.Strong(*inlines)]
+
+
+def _style(table: pf.Table, settings: dict[str, Any]) -> None:
+    body_align = _ALIGN.get(settings["body"].get("align"), "AlignDefault")
+    full = settings.get("width") == "full"
+    widths_default = all(width == "ColWidthDefault" for _, width in table.colspec)
+    n = len(table.colspec) or 1
+    table.colspec = [
+        (body_align if align == "AlignDefault" else align, 1.0 / n if full and widths_default else width)
+        for align, width in table.colspec
+    ]
+    header_align = _ALIGN.get(settings["header"].get("align"))
+    for row in table.head.content:
+        for cell in row.content:
+            if header_align:
+                cell.alignment = header_align
+            if settings["header"].get("bold"):
+                _embolden(cell)
+    if settings["first_column"].get("bold"):
+        for body in table.content:
+            for row in body.content:
+                if row.content:
+                    _embolden(row.content[0])
+
+
+def _typst(text: str) -> pf.RawBlock:
+    # panflute 2.3.1 rejects "typst" in the constructor, so the format is set after construction.
+    block = pf.RawBlock(text, format="html")
+    block.format = "typst"
+    return block
+
+
+def _in_footnote(elem: pf.Element) -> bool:
+    parent = elem.parent
+    while parent is not None:
+        if isinstance(parent, pf.Note):
+            return True
+        parent = parent.parent
+    return False
+
+
+def _variant_marker(block: pf.Element) -> str | None:
+    if isinstance(block, pf.RawBlock) and block.format == "html":
+        match = _VARIANT.match(block.text)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _drop_pending(ctx: FilterContext, name: str) -> None:
+    ctx.report.info(Codes.TABLE_VARIANT_UNKNOWN, f"표 종류 표시 '{name}' 다음에 표가 없어 무시합니다", variant=name)
+
+
+def apply(doc: pf.Doc, ctx: FilterContext) -> pf.Doc:
+    known = ctx.config["tables"].get("variants") or {}
+    out: list[pf.Element] = []
+    variant_of: dict[int, str | None] = {}
+    pending: str | None = None
+
+    for block in doc.content:
+        marker = _variant_marker(block)
+        if marker is not None:
+            pending = marker
+            continue
+        if isinstance(block, pf.Table):
+            variant = None
+            if pending is not None:
+                if pending in known:
+                    variant = pending
+                else:
+                    ctx.report.info(Codes.TABLE_VARIANT_UNKNOWN, f"표 종류 '{pending}' 이(가) 템플릿에 없어 기본 표 스타일을 씁니다", variant=pending)
+                pending = None
+            _style(block, table_settings(ctx.config, variant))
+            variant_of[id(block)] = variant
+            head_rows = len(block.head.content)
+            if ctx.target is Format.PDF:
+                out.append(_typst(f'#mdcast-table(cfg, "{variant or "_default"}", {head_rows})['))
+                out.append(block)
+                out.append(_typst("]"))
+                continue
+        elif pending is not None:
+            _drop_pending(ctx, pending)
+            pending = None
+        out.append(block)
+    if pending is not None:
+        _drop_pending(ctx, pending)
+    doc.content = out
+
+    default_settings = table_settings(ctx.config, None)
+    records: list[dict[str, Any]] = []
+
+    def collect(elem: pf.Element, _doc: pf.Doc):
+        if isinstance(elem, pf.Table):
+            if _in_footnote(elem):
+                return  # footnote tables go to footnotes.xml: no variant, not collected
+            if id(elem) not in variant_of:
+                _style(elem, default_settings)
+            records.append({"variant": variant_of.get(id(elem)), "head_rows": len(elem.head.content)})
+
+    doc.walk(collect)
+    ctx.state["tables"] = records
+    return doc
