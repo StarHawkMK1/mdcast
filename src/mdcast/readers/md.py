@@ -11,6 +11,7 @@ from mdcast.report import Codes, Report
 from mdcast.types import Source
 
 _TABLE_START = re.compile(r"^\s*<table[\s>]", re.IGNORECASE)
+_FRONTMATTER = re.compile(r"\A---[ \t]*\r?\n(?:.*?\r?\n)??(?:---|\.\.\.)[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 
 
 @dataclass
@@ -44,8 +45,26 @@ def expand_html_tables(doc: pf.Doc) -> pf.Doc:
     return doc.walk(action)
 
 
+def _yaml_error_detail(exc: RuntimeError) -> str:
+    lines = [line.strip() for line in str(exc).splitlines() if line.strip()]
+    return next((line for line in lines if "YAML" in line), lines[0] if lines else "")
+
+
 def read_md(source: Source, report: Report) -> MdDocument:
     text = decode_text(source.data, report)
-    doc = expand_html_tables(md_to_doc(text))
+    try:
+        doc = md_to_doc(text)
+    except RuntimeError as exc:
+        # Malformed frontmatter must not reject the document: drop the block and keep the body.
+        block = _FRONTMATTER.match(text)
+        if block is None:
+            raise
+        body = expand_html_tables(md_to_doc(text[block.end():]))
+        report.warn(
+            Codes.FRONTMATTER_INVALID,
+            f"frontmatter(YAML)를 해석할 수 없어 무시합니다: {_yaml_error_detail(exc)}",
+        )
+        return MdDocument(body, {})
+    doc = expand_html_tables(doc)
     meta = doc.get_metadata()
     return MdDocument(doc, dict(meta) if isinstance(meta, dict) else {})

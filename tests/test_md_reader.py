@@ -1,5 +1,7 @@
 import panflute as pf
+import pytest
 
+import mdcast.readers.md as md_module
 from mdcast.readers.md import read_md
 from mdcast.report import Codes, Level, Report
 from mdcast.types import Format, Source
@@ -57,3 +59,19 @@ def test_undecodable_input_is_read_with_replacement_and_warn():
     md, r = read(b"# \xff\xfe\n")
     assert isinstance(md.doc.content[0], pf.Header)
     assert [(e.level, e.code) for e in r.events] == [(Level.WARN, Codes.INPUT_ENCODING_FALLBACK)]
+
+
+def test_malformed_frontmatter_is_dropped_with_warn():
+    md, r = read("---\ntitle: [a\nx: : y\n---\n\n본문\n".encode())
+    assert md.frontmatter == {}
+    assert pf.stringify(md.doc).strip() == "본문"
+    assert [(e.level, e.code) for e in r.events] == [(Level.WARN, Codes.FRONTMATTER_INVALID)]
+
+
+def test_pandoc_failure_without_frontmatter_still_raises(monkeypatch):
+    def fail(_text):
+        raise RuntimeError("Pandoc died with exitcode 64")
+
+    monkeypatch.setattr(md_module, "md_to_doc", fail)
+    with pytest.raises(RuntimeError):
+        read(b"# a\n")
