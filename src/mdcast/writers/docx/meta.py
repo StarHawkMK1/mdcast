@@ -1,0 +1,69 @@
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from docx.opc.constants import RELATIONSHIP_TYPE as RT
+from docx.opc.packuri import PackURI
+from docx.opc.part import Part
+from lxml import etree
+
+from mdcast.fields import ResolvedFields
+
+CUSTOM_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.custom-properties+xml"
+_NS_CP = "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties"
+_NS_VT = "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"
+_FMTID = "{D5CDD505-2E9C-101B-9397-08002B2CF9AE}"
+
+
+def _custom_values(generator: dict[str, Any]) -> dict[str, str]:
+    template = generator.get("template") or {}
+    mdcast = generator.get("generator")
+    if not mdcast and generator.get("mdcast"):
+        mdcast = f"mdcast {generator['mdcast']}"
+    values = {
+        "mdcast.generator": mdcast,
+        "mdcast.template.name": template.get("name"),
+        "mdcast.template.version": template.get("version"),
+        "mdcast.template.source": template.get("source"),
+        "mdcast.pandoc": generator.get("pandoc"),
+        "mdcast.typst": generator.get("typst"),
+    }
+    return {k: str(v) for k, v in values.items() if v not in (None, "")}
+
+
+def _merge_custom(blob: bytes | None, values: dict[str, str]) -> bytes:
+    root = etree.fromstring(blob) if blob else etree.Element(f"{{{_NS_CP}}}Properties", nsmap={None: _NS_CP, "vt": _NS_VT})
+    props = root.findall(f"{{{_NS_CP}}}property")
+    for prop in list(props):
+        if prop.get("name") in values:
+            root.remove(prop)
+    pids = [int(p.get("pid", 0)) for p in root.findall(f"{{{_NS_CP}}}property")]
+    pid = max([1, *pids])
+    for name, value in values.items():
+        pid += 1
+        prop = etree.SubElement(root, f"{{{_NS_CP}}}property", fmtid=_FMTID, pid=str(pid), name=name)
+        etree.SubElement(prop, f"{{{_NS_VT}}}lpwstr").text = value
+    return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+
+
+def _write_custom_properties(d, values: dict[str, str]) -> None:
+    if not values:
+        return
+    package = d.part.package
+    for rel in package.rels.values():
+        if rel.reltype == RT.CUSTOM_PROPERTIES and not rel.is_external:
+            rel.target_part._blob = _merge_custom(rel.target_part.blob, values)
+            return
+    part = Part(PackURI("/docProps/custom.xml"), CUSTOM_CONTENT_TYPE, _merge_custom(None, values), package)
+    package.relate_to(part, RT.CUSTOM_PROPERTIES)
+
+
+def apply_metadata(d, generator: dict[str, Any], fields: ResolvedFields) -> None:
+    props = d.core_properties
+    props.comments = json.dumps(generator, ensure_ascii=False)
+    props.keywords = "mdcast"
+    title = fields.values.get("title")
+    if title:
+        props.title = title
+    _write_custom_properties(d, _custom_values(generator))
