@@ -105,15 +105,10 @@ def set_font(style, font_cfg: dict[str, Any]) -> None:
     rfonts.set(qn("w:eastAsia"), family)
 
 
-def _pt(value: object) -> Pt:
-    # parse_pt can return 12.999999999999998, which Pt() would truncate to 12.5pt in half-points
-    return Pt(round(parse_pt(value), 4))
-
-
 def apply_look(style, look: dict[str, Any], *, character_only: bool = False) -> None:
     font = style.font
     if look.get("size") is not None:
-        font.size = _pt(look["size"])
+        font.size = Pt(parse_pt(look["size"]))
     if look.get("bold") is not None:
         font.bold = bool(look["bold"])
     if look.get("italic") is not None:
@@ -128,9 +123,9 @@ def apply_look(style, look: dict[str, Any], *, character_only: bool = False) -> 
     if look.get("line_height") is not None:
         fmt.line_spacing = parse_ratio(look["line_height"])
     if look.get("space_before") is not None:
-        fmt.space_before = _pt(look["space_before"])
+        fmt.space_before = Pt(parse_pt(look["space_before"]))
     if look.get("space_after") is not None:
-        fmt.space_after = _pt(look["space_after"])
+        fmt.space_after = Pt(parse_pt(look["space_after"]))
     if look.get("indent_left") is not None:
         fmt.left_indent = Mm(parse_length_mm(look["indent_left"]))
     if look.get("keep_with_next") is not None:

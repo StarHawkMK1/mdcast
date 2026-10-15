@@ -40,3 +40,10 @@ def test_colors():
 def test_page_sizes():
     assert page_size_mm("a4", "portrait") == (210.0, 297.0)
     assert page_size_mm("A4", "landscape") == (297.0, 210.0)
+
+
+def test_conversions_have_no_float_noise():
+    assert parse_pt("13pt") == 13.0
+    assert parse_pt("1in") == 72.0
+    assert parse_pt("4.6mm") == pytest.approx(13.04, abs=1e-2)
+    assert parse_length_mm("13pt") == 4.586111

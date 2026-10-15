@@ -31,7 +31,7 @@ def parse_length_mm(value: object) -> float:
     unit = unit or "mm"
     if unit not in _MM_PER:
         raise ValueError(f"지원하지 않는 길이 단위입니다: {value!r}")
-    return number * _MM_PER[unit]
+    return round(number * _MM_PER[unit], 6)
 
 
 def parse_pt(value: object) -> float:
@@ -39,7 +39,7 @@ def parse_pt(value: object) -> float:
     unit = unit or "pt"
     if unit not in _MM_PER:
         raise ValueError(f"지원하지 않는 크기 단위입니다: {value!r}")
-    return number * _MM_PER[unit] / _MM_PER["pt"]
+    return round(number * _MM_PER[unit] / _MM_PER["pt"], 6)
 
 
 def parse_ratio(value: object) -> float:
