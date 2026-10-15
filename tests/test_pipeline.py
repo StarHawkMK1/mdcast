@@ -1,7 +1,9 @@
+import importlib.metadata
 import zipfile
 from io import BytesIO
 from pathlib import Path
 
+import pytest
 from helpers import write_template
 
 from mdcast import pipeline
@@ -137,3 +139,106 @@ def test_frontmatter_template_name_is_not_treated_as_a_path(tmp_path):
     write_template(tmp_path / ".mdcast" / "templates", "rep", "name: rep\n")
     source = Source("---\ntemplate: rep\n---\n\n본문\n".encode(), "보고서.md", Format.MD, base_dir=docs)
     assert pipeline.convert(source, [Format.DOCX], options=opts(tmp_path)).report.template.name == "rep"
+
+
+def _warn_codes(result):
+    return [e.code for e in result.report.events if e.level is Level.WARN]
+
+
+def _errors(result):
+    return [e for e in result.report.events if e.level is Level.ERROR]
+
+
+def test_template_resolution_crash_falls_back_to_builtin_default(tmp_path, monkeypatch):
+    real = pipeline.resolve_template
+
+    def flaky(ref, **kw):
+        if ref is not None:
+            raise RuntimeError("resolver bug")
+        return real(ref, **kw)
+
+    monkeypatch.setattr(pipeline, "resolve_template", flaky)
+    result = pipeline.convert(src("# 개요\n\n본문\n"), [Format.DOCX, Format.PDF], "rep", options=opts(tmp_path))
+    assert all(o.data for o in result.outputs), [e.to_dict() for e in result.report.events]
+    assert result.report.template.name == "default"
+    assert Codes.TEMPLATE_INVALID in _warn_codes(result)
+    assert not _errors(result)
+
+
+def test_template_fallback_crash_is_an_error_not_an_exception(tmp_path, monkeypatch):
+    def broken(ref, **kw):
+        raise RuntimeError("resolver bug")
+
+    monkeypatch.setattr(pipeline, "resolve_template", broken)
+    result = pipeline.convert(src("본문\n"), [Format.DOCX, Format.PDF], options=opts(tmp_path))
+    assert [o.data for o in result.outputs] == [None, None]
+    assert statuses(result) == {"docx": "failed", "pdf": "failed"}
+    assert [e.code for e in _errors(result)] == [Codes.RENDER_FAILED]
+
+
+def test_template_info_crash_falls_back_to_builtin_default(tmp_path, monkeypatch):
+    calls = []
+    real_info = pipeline.ResolvedTemplate.info
+
+    def flaky_info(self, formats):
+        calls.append(self.name)
+        if len(calls) == 1:
+            raise KeyError("per_format")
+        return real_info(self, formats)
+
+    monkeypatch.setattr(pipeline.ResolvedTemplate, "info", flaky_info)
+    result = pipeline.convert(src("본문\n"), [Format.DOCX, Format.PDF], options=opts(tmp_path))
+    assert all(o.data for o in result.outputs)
+    assert Codes.TEMPLATE_INVALID in _warn_codes(result)
+
+
+def test_fields_crash_uses_empty_fields(tmp_path, monkeypatch):
+    def broken(*args, **kw):
+        raise TypeError("fields bug")
+
+    monkeypatch.setattr(pipeline, "resolve_fields", broken)
+    result = pipeline.convert(src("---\ntitle: 제목\n---\n\n본문\n"), [Format.DOCX, Format.PDF], options=opts(tmp_path))
+    assert all(o.data for o in result.outputs), [e.to_dict() for e in result.report.events]
+    assert Codes.RENDER_WARNING in _warn_codes(result)
+    assert not _errors(result)
+
+
+def test_generator_crash_uses_a_minimal_generator(tmp_path, monkeypatch):
+    def broken(tpl):
+        raise importlib.metadata.PackageNotFoundError("typst")
+
+    monkeypatch.setattr(pipeline, "build_generator", broken)
+    result = pipeline.convert(src("본문\n"), [Format.DOCX, Format.PDF], options=opts(tmp_path))
+    assert all(o.data for o in result.outputs), [e.to_dict() for e in result.report.events]
+    assert Codes.RENDER_WARNING in _warn_codes(result)
+    assert not _errors(result)
+    docx_data = by_format(result)[Format.DOCX].data
+    with zipfile.ZipFile(BytesIO(docx_data)) as z:
+        custom = z.read("docProps/custom.xml").decode("utf-8")
+    assert "mdcast.generator" in custom
+
+
+@pytest.mark.parametrize("keep_temp", [False, True])
+def test_workspace_that_cannot_be_created_is_an_error(tmp_path, keep_temp):
+    options = opts(tmp_path, keep_temp=keep_temp, temp_root=tmp_path / "missing")
+    result = pipeline.convert(src("본문\n"), [Format.DOCX, Format.PDF], options=options)
+    assert [o.data for o in result.outputs] == [None, None]
+    assert statuses(result) == {"docx": "failed", "pdf": "failed"}
+    assert [e.code for e in _errors(result)] == [Codes.RENDER_FAILED]
+
+
+def test_workspace_cleanup_error_keeps_the_outputs(tmp_path, monkeypatch):
+    import contextlib
+
+    @contextlib.contextmanager
+    def sticky(options, report):
+        work = tmp_path / "work"
+        work.mkdir()
+        yield work
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(pipeline, "_workspace", sticky)
+    result = pipeline.convert(src("본문\n"), [Format.DOCX, Format.PDF], options=opts(tmp_path))
+    assert all(o.data for o in result.outputs)
+    assert not _errors(result)
+    assert any(e.code == Codes.RENDER_WARNING and "locked" in e.message for e in result.report.events)
