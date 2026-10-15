@@ -99,3 +99,22 @@ def test_default_pdf_embeds_malgun_when_installed(tmp_path):
     data, ctx = render(tmp_path, "본문\n")
     assert b"MalgunGothic" in data
     assert Codes.FONT_FALLBACK not in [e.code for e in ctx.report.events]
+
+
+def long_table_md(rows: int = 120) -> str:
+    lines = ["| 번호 | 항목 |", "|---|---|"]
+    lines += [f"| {i} | 행{i:03d} |" for i in range(1, rows + 1)]
+    return "\n".join(lines) + "\n"
+
+
+@pytest.mark.parametrize("width", ["full", "auto"])
+def test_long_table_breaks_across_pages_with_repeated_header(tmp_path, width):
+    tpl = write_template(tmp_path, "t", f"name: t\ntables: {{width: {width}}}\n")
+    data, _ = render(tmp_path, long_table_md(), str(tpl))
+    texts = [norm(t) for t in pages_text(data)]
+    assert len(texts) > 1
+    assert "행001" in texts[0]
+    assert "행120" in texts[-1]
+    assert "항목" in texts[1]
+    for i in range(1, 121):
+        assert sum(f"행{i:03d}" in t for t in texts) == 1, i

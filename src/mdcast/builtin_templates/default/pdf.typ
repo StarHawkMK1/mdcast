@@ -54,7 +54,10 @@
       else { none }
     },
   )
-  show table: it => box(stroke: outer, it)
+  // breakable so long tables flow onto the next pages (header rows repeat); the measured
+  // width keeps the outer border hugging an auto-width table
+  show table: it => layout(size => block(
+    breakable: true, stroke: outer, width: measure(it, width: size.width).width, it))
   body
 }
 
@@ -90,6 +93,7 @@
     },
   )
   set figure(numbering: none)
+  show figure.where(kind: table): set block(breakable: true)
   show figure.where(kind: table): set figure.caption(
     position: if cfg.tables.at("_default").caption.position == "below" { bottom } else { top })
   show figure.where(kind: image): set figure.caption(

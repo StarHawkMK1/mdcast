@@ -1,9 +1,10 @@
 from pathlib import Path
 
+import pypdfium2 as pdfium
 import pytest
 
 from mdcast import pipeline
-from mdcast.report import Codes
+from mdcast.report import Codes, Level
 from mdcast.types import Format, Options, Source
 
 FIXTURES = Path(__file__).parent / "fixtures" / "md"
@@ -85,3 +86,30 @@ def test_broken_frontmatter_never_rejects(tmp_path, case):
     assert len(result.outputs) == 2
     assert all(o.data for o in result.outputs), [e.to_dict() for e in result.report.events]
     assert expected in [e.code for e in result.report.events]
+
+
+def _long_table(rows: int = 120) -> str:
+    return "| 번호 | 항목 |\n|---|---|\n" + "".join(f"| {i} | 행{i:03d} |\n" for i in range(1, rows + 1))
+
+
+# case -> (markdown, extra files in the document folder, expected code or None, texts the PDF must contain)
+CONTENT_CASES = {
+    "table-longer-than-a-page": ("# 표\n\n" + _long_table() + "\n끝 문단\n", {}, None, ["행001", "행120", "끝 문단"]),
+}
+
+
+@pytest.mark.parametrize("case", sorted(CONTENT_CASES))
+def test_hard_content_never_rejects(tmp_path, case):
+    text, files, expected, must_contain = CONTENT_CASES[case]
+    for filename, data in files.items():
+        (tmp_path / filename).write_bytes(data)
+    source = Source(text.encode("utf-8"), "doc.md", Format.MD, base_dir=tmp_path)
+    result = _convert(tmp_path, source, None)
+    assert all(o.data for o in result.outputs), [e.to_dict() for e in result.report.events]
+    assert not [e for e in result.report.events if e.level is Level.ERROR]
+    if expected is not None:
+        assert expected in [e.code for e in result.report.events]
+    pdf = pdfium.PdfDocument(next(o.data for o in result.outputs if o.format is Format.PDF))
+    pdf_text = " ".join(" ".join(pdf[i].get_textpage().get_text_range().split()) for i in range(len(pdf)))
+    for needle in must_contain:
+        assert needle in pdf_text
