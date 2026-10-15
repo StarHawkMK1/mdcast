@@ -1,15 +1,19 @@
 import http.server
+import io
 import threading
+import zipfile
 from contextlib import contextmanager
 from dataclasses import replace
 
 import docx
 import panflute as pf
+import pypdfium2 as pdfium
 import pytest
 from helpers import build, make_reference_docx, tiny_bmp, tiny_jpeg, tiny_png
 
+from mdcast import pipeline
 from mdcast.report import Codes
-from mdcast.types import Format
+from mdcast.types import Format, Options, Source
 from mdcast.writers.images import localize_images
 
 
@@ -160,10 +164,11 @@ def test_reachable_remote_image_is_downloaded(tmp_path):
         assert failed_codes(tmp_path, base + "/a.png") == (["assets/img1.png"], [])
 
 
-def localized(tmp_path, name, data, md=None):
+def localized(tmp_path, name, data, md=None, *, strict_types=False):
     (tmp_path / name).write_bytes(data)
-    doc, ctx = build(tmp_path, md or f"앞 ![그림]({name}) 뒤\n", Format.DOCX)
-    return localize_images(doc, ctx), ctx
+    target = Format.PDF if strict_types else Format.DOCX
+    doc, ctx = build(tmp_path, md or f"앞 ![그림]({name}) 뒤\n", target)
+    return localize_images(doc, ctx, strict_types=strict_types), ctx
 
 
 def test_png_bytes_named_jpg_are_saved_as_png(tmp_path):
@@ -213,8 +218,8 @@ def corrupt_png() -> bytes:
         ("icon.svg", b"<div><svg/></div>", "지원하지 않는 이미지 형식"),
     ],
 )
-def test_unsupported_or_broken_image_becomes_placeholder(tmp_path, name, data, reason):
-    doc, ctx = localized(tmp_path, name, data)
+def test_strict_types_turn_unsupported_or_broken_image_into_placeholder(tmp_path, name, data, reason):
+    doc, ctx = localized(tmp_path, name, data, strict_types=True)
     assert images(doc) == []
     assert "[이미지: 그림]" in pf.stringify(doc)
     [event] = ctx.report.events
@@ -265,3 +270,33 @@ def test_check_hook_rejection_becomes_placeholder(tmp_path):
     assert images(doc) == []
     [event] = ctx.report.events
     assert event.code == Codes.IMAGE_FETCH_FAILED and "읽을 수 없음 assets/img1.png" in event.message
+
+
+@pytest.mark.parametrize(
+    ("name", "data", "expected"),
+    [
+        ("pic.bmp", tiny_bmp(), "assets/img1.bmp"),
+        ("crc.png", corrupt_png(), "assets/img1.png"),
+        ("drawing.emf", b"\x01\x00\x00\x00" + bytes(80), "assets/img1.emf"),
+        ("noext", tiny_bmp(), "assets/img1.png"),
+    ],
+)
+def test_docx_keeps_types_it_does_not_recognise(tmp_path, name, data, expected):
+    doc, ctx = localized(tmp_path, name, data)
+    assert images(doc) == [expected]
+    assert ctx.report.events == []
+
+
+def test_bmp_is_embedded_in_docx_and_a_placeholder_in_pdf(tmp_path):
+    (tmp_path / "pic.bmp").write_bytes(tiny_bmp())
+    source = Source("앞 ![작은 그림](pic.bmp) 뒤\n".encode(), "doc.md", Format.MD, base_dir=tmp_path)
+    options = Options(offline=True, cwd=tmp_path, home=tmp_path / "home")
+    result = pipeline.convert(source, [Format.DOCX, Format.PDF], options=options)
+    outputs = {o.format: o.data for o in result.outputs}
+    names = zipfile.ZipFile(io.BytesIO(outputs[Format.DOCX])).namelist()
+    media = [n for n in names if n.startswith("word/media/")]
+    assert media and media[0].endswith(".bmp")
+    pdf = pdfium.PdfDocument(outputs[Format.PDF])
+    assert "[이미지: 작은 그림]" in pdf[0].get_textpage().get_text_range()
+    failed = [e.where.get("format") for e in result.report.events if e.code == Codes.IMAGE_FETCH_FAILED]
+    assert failed == ["pdf"]

@@ -77,7 +77,7 @@ def _report_warnings(warnings, ctx: WriterContext, report: Report) -> None:
 
 
 def write_pdf(doc: pf.Doc, ctx: WriterContext) -> bytes:
-    doc = localize_images(doc, ctx, check=_decodable_by_typst(ctx.work_dir))
+    doc = localize_images(doc, ctx, strict_types=True, check=_decodable_by_typst(ctx.work_dir))
     _reset_ordered_lists(doc)
     try:
         body = convert_doc(doc, "typst")

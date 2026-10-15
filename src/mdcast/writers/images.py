@@ -63,12 +63,13 @@ def _fetch(url: str, timeout: float) -> bytes:
     return b"".join(chunks)
 
 
-def _load(url: str, ctx: WriterContext) -> bytes:
+def _load(url: str, ctx: WriterContext) -> tuple[bytes, str]:
+    """The image bytes and the extension its name suggests (may be empty)."""
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme in ("http", "https"):
         if ctx.options.offline:
             raise _ImageError("오프라인 모드")
-        return _fetch(url, ctx.options.url_timeout_s)
+        return _fetch(url, ctx.options.url_timeout_s), Path(parsed.path).suffix.lower()
     if parsed.scheme and len(parsed.scheme) > 1:
         raise _ImageError(f"지원하지 않는 주소 형식: {parsed.scheme}")
     path = Path(urllib.parse.unquote(url))
@@ -77,7 +78,7 @@ def _load(url: str, ctx: WriterContext) -> bytes:
     if not path.is_file():
         raise _ImageError("파일이 없습니다")
     try:
-        return path.read_bytes()
+        return path.read_bytes(), path.suffix.lower()
     except OSError as exc:
         raise _ImageError(str(exc)) from exc
 
@@ -98,10 +99,14 @@ def _png_complete(data: bytes) -> bool:
     return False
 
 
-def _extension(data: bytes) -> str:
-    """The file extension for the image bytes; the renderers pick their decoder by extension."""
+def _extension(data: bytes, named: str, strict: bool) -> str:
+    """The file extension for the image bytes; the renderers pick their decoder by extension.
+
+    Unrecognised or damaged data keeps the extension of its name (``.png`` when it has none),
+    unless ``strict``, which rejects it instead.
+    """
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        if not _png_complete(data):
+        if strict and not _png_complete(data):
             raise _ImageError("이미지 파일이 손상되었습니다")
         return ".png"
     if data.startswith(b"\xff\xd8\xff"):
@@ -112,7 +117,9 @@ def _extension(data: bytes) -> str:
         return ".webp"
     if _SVG_START.match(data[:4096]):
         return ".svg"
-    raise _ImageError("지원하지 않는 이미지 형식입니다 (PNG, JPEG, GIF, WebP, SVG 만 지원)")
+    if strict:
+        raise _ImageError("지원하지 않는 이미지 형식입니다 (PNG, JPEG, GIF, WebP, SVG 만 지원)")
+    return named or ".png"
 
 
 def _caption_inlines(figure: pf.Figure) -> list[pf.Inline]:
@@ -126,14 +133,20 @@ def _caption_inlines(figure: pf.Figure) -> list[pf.Inline]:
 
 
 def localize_images(
-    doc: pf.Doc, ctx: WriterContext, check: Callable[[str], str | None] | None = None
+    doc: pf.Doc,
+    ctx: WriterContext,
+    *,
+    strict_types: bool = False,
+    check: Callable[[str], str | None] | None = None,
 ) -> pf.Doc:
     """Copy every image into ``work_dir/assets`` under a name whose extension matches its bytes.
 
-    An image that cannot be loaded, is of an unsupported type, or is rejected by ``check``
-    (given the ``assets/...`` path, returns a reason or ``None``) becomes a placeholder with an
-    IMAGE_FETCH_FAILED warning. A figure that lost an image becomes a plain paragraph that keeps
-    its caption text, so the writers do not turn it into a layout table.
+    An image that cannot be loaded, or that is rejected by ``check`` (given the ``assets/...``
+    path, returns a reason or ``None``) becomes a placeholder with an IMAGE_FETCH_FAILED
+    warning. With ``strict_types`` (PDF: Typst only reads PNG, JPEG, GIF, WebP and SVG) an
+    unrecognised or damaged image does too; otherwise (docx: Word shows BMP, TIFF, EMF, ...) it
+    is kept under its own extension. A figure that lost an image becomes a plain paragraph that
+    keeps its caption text, so the writers do not turn it into a layout table.
     """
     assets = ctx.work_dir / "assets"
     assets.mkdir(parents=True, exist_ok=True)
@@ -142,8 +155,8 @@ def localize_images(
 
     def localize(elem: pf.Image) -> pf.Element | None:
         try:
-            data = _load(elem.url, ctx)
-            name = f"img{next(counter)}{_extension(data)}"
+            data, named = _load(elem.url, ctx)
+            name = f"img{next(counter)}{_extension(data, named, strict_types)}"
             (assets / name).write_bytes(data)
             reason = check(f"assets/{name}") if check is not None else None
             if reason is not None:
