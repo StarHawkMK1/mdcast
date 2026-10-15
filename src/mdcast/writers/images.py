@@ -171,7 +171,8 @@ def localize_images(
             )
             placeholder = pf.Emph(pf.Str(f"[이미지: {alt}]"))
             placeholders.add(id(placeholder))
-            return placeholder
+            # keep the image's id, or links to it break (Typst: missing label)
+            return pf.Span(placeholder, identifier=elem.identifier) if elem.identifier else placeholder
         elem.url = f"assets/{name}"
         return None
 

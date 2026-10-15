@@ -138,3 +138,12 @@ def test_label_of_a_figure_that_lost_its_image_survives(tmp_path):
     assert "[이미지: 그림 설명]" in text and "그림 참조" in text
     assert "<fig-a>" in (ctx.work_dir / "main.typ").read_text(encoding="utf-8")
     assert Codes.IMAGE_FETCH_FAILED in [e.code for e in ctx.report.events]
+
+
+def test_label_of_an_inline_image_that_became_a_placeholder_survives(tmp_path):
+    md = "앞 ![설명](none.png){#img-a} 뒤\n\n[참조](#img-a)\n"
+    data, ctx = render(tmp_path, md)
+    text = norm(pages_text(data)[0])
+    assert "[이미지: 설명]" in text and "참조" in text
+    assert "<img-a>" in (ctx.work_dir / "main.typ").read_text(encoding="utf-8")
+    assert Codes.IMAGE_FETCH_FAILED in [e.code for e in ctx.report.events]

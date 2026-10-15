@@ -111,6 +111,12 @@ CONTENT_CASES = {
         Codes.IMAGE_FETCH_FAILED,
         ["[이미지: 그림 설명]", "그림 참조"],
     ),
+    "linked-inline-missing-image": (
+        "앞 문단 ![설명](none.png){#img-a} 뒤\n\n[참조](#img-a)\n",
+        {},
+        Codes.IMAGE_FETCH_FAILED,
+        ["[이미지: 설명]", "참조"],
+    ),
 }
 
 
