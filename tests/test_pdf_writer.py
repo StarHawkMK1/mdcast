@@ -1,4 +1,7 @@
+from pathlib import Path
+
 import pypdfium2 as pdfium
+import pytest
 from helpers import build, write_template
 
 from mdcast.report import Codes
@@ -64,3 +67,35 @@ def test_broken_custom_layout_falls_back_to_builtin(tmp_path):
 def test_ordered_list_style_does_not_override_template_numbering(tmp_path):
     _, ctx = render(tmp_path, "1) a\n2) b\n")
     assert "#set enum(numbering:" not in (ctx.work_dir / "main.typ").read_text(encoding="utf-8")
+
+
+def test_custom_layout_copy_failure_falls_back_to_builtin(tmp_path, monkeypatch):
+    import shutil
+
+    import mdcast.writers.pdf as pdf_mod
+
+    tpl = write_template(tmp_path, "t", "name: t\n", {"pdf.typ": b"#let conf(cfg, doc) = doc\n"})
+    doc, ctx = build(tmp_path, "본문\n", Format.PDF, template=str(tpl))
+    real = shutil.copyfile
+
+    def flaky(src, dst, *a, **k):
+        if Path(src).parent.name == "t":
+            raise OSError("boom")
+        return real(src, dst, *a, **k)
+
+    monkeypatch.setattr(pdf_mod.shutil, "copyfile", flaky)
+    assert write_pdf(doc, ctx).startswith(b"%PDF")
+    assert Codes.TEMPLATE_INVALID in [e.code for e in ctx.report.events]
+
+
+def test_default_pdf_embeds_malgun_when_installed(tmp_path):
+    import typst
+
+    probe = tmp_path / "p.typ"
+    probe.write_text('#set text(font: "Malgun Gothic")\n가', encoding="utf-8")
+    _, warnings = typst.compile_with_warnings(str(probe), root=str(tmp_path))
+    if any("unknown font family" in w.message.lower() for w in warnings):
+        pytest.skip("Malgun Gothic not installed")
+    data, ctx = render(tmp_path, "본문\n")
+    assert b"MalgunGothic" in data
+    assert Codes.FONT_FALLBACK not in [e.code for e in ctx.report.events]

@@ -82,10 +82,10 @@ def write_pdf(doc: pf.Doc, ctx: WriterContext) -> bytes:
         candidates.append((builtin.path, "builtin"))
     last_error: Exception | None = None
     for path, source in candidates:
-        shutil.copyfile(path, ctx.work_dir / "mdcast.typ")
         try:
+            shutil.copyfile(path, ctx.work_dir / "mdcast.typ")
             pdf, warnings = _compile(main, ctx.work_dir, cfg_json)
-        except typst.TypstError as exc:
+        except (typst.TypstError, OSError) as exc:
             last_error = exc
             if source == "custom":
                 ctx.report.warn(
