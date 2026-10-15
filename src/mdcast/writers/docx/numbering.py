@@ -3,6 +3,8 @@ from __future__ import annotations
 import unicodedata
 from typing import Any
 
+from docx.opc.constants import RELATIONSHIP_TYPE as RT
+from docx.oxml import parse_xml
 from docx.oxml.ns import qn
 
 from mdcast.counters import format_counter, word_level
@@ -25,15 +27,29 @@ def _hanging_twips(markers: list[str], body_pt: float) -> int:
     return max(round(em * body_pt * 20), mm_to_twips(_MIN_HANGING_MM))
 
 
-def _body_abstract_ids(d) -> set[str]:
-    """abstractNumIds behind the numIds that body paragraphs use directly (pandoc's own lists).
+def _note_roots(d) -> list[Any]:
+    """Root elements of the footnotes and endnotes parts, when the document has them."""
+    roots = []
+    for rel in d.part.rels.values():
+        if rel.is_external or rel.reltype not in (RT.FOOTNOTES, RT.ENDNOTES):
+            continue
+        part = rel.target_part
+        # python-docx loads these as plain parts; reading the numIds is all that is needed
+        roots.append(part.element if hasattr(part, "element") else parse_xml(part.blob))
+    return roots
+
+
+def _list_abstract_ids(d) -> set[str]:
+    """abstractNumIds behind the numIds that body, footnote and endnote paragraphs use directly
+    (pandoc's own lists).
 
     Lists that only a style links to (the container's outline or list styles) are left alone.
     """
     numbering = d.part.numbering_part.element
     used = {
         num_id.get(qn("w:val"))
-        for num_pr in d.element.body.iter(qn("w:numPr"))
+        for root in (d.element.body, *_note_roots(d))
+        for num_pr in root.iter(qn("w:numPr"))
         for num_id in num_pr.findall(qn("w:numId"))
     }
     ids = set()
@@ -57,7 +73,7 @@ def apply_list_numbering(d, config: dict[str, Any]) -> None:
         body_pt = 11.0
     family = str(config["fonts"]["body"].get("family") or "").strip()
     latin = latin_name(family) if family else ""
-    targets = _body_abstract_ids(d)
+    targets = _list_abstract_ids(d)
     for abstract in numbering.findall(qn("w:abstractNum")):
         if abstract.get(qn("w:abstractNumId")) not in targets:
             continue

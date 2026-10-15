@@ -177,3 +177,40 @@ def test_container_own_style_linked_numbering_is_untouched(tmp_path):
     assert (ind.get(qn("w:left")), ind.get(qn("w:hanging"))) == ("720", "360")
     bullets = [lv for lv in abstract_levels(data) if lv[0][1] == "□"]
     assert bullets, "the body list still gets the template's 개조식 symbols"
+
+
+def note_abstract_texts(data: bytes, part_name: str = "word/footnotes.xml") -> list[list[str]]:
+    """lvlTexts of the abstractNums behind the numIds that ``part_name``'s paragraphs use."""
+    archive = zipfile.ZipFile(io.BytesIO(data))
+    notes = etree.fromstring(archive.read(part_name))
+    root = etree.fromstring(archive.read("word/numbering.xml"))
+    used = {n.get(qn("w:val")) for n in notes.iter(qn("w:numId"))}
+    ids = {
+        num.find(qn("w:abstractNumId")).get(qn("w:val"))
+        for num in root.findall(qn("w:num"))
+        if num.get(qn("w:numId")) in used
+    }
+    return [
+        [lvl.find(qn("w:lvlText")).get(qn("w:val")) for lvl in a.findall(qn("w:lvl"))]
+        for a in root.findall(qn("w:abstractNum"))
+        if a.get(qn("w:abstractNumId")) in ids
+    ]
+
+
+def test_list_inside_a_footnote_uses_template_symbols(tmp_path):
+    data = render(tmp_path, "본문[^1]\n\n[^1]: 각주\n\n    - 하나\n        - 둘\n")
+    assert body_abstracts(data) == [], "the body has no list of its own"
+    found = note_abstract_texts(data)
+    assert found and found[0][:2] == ["□", "○"]
+
+
+def test_footnote_list_keeps_container_style_linked_numbering(tmp_path):
+    tpl = tmp_path / "t"
+    tpl.mkdir()
+    (tpl / "template.yaml").write_text("name: t\nlists: {ordered: ['(가)']}\n", encoding="utf-8")
+    style_linked_reference(tpl / "reference.docx")
+    data = render(tmp_path, "본문[^1]\n\n[^1]: 각주\n\n    1. 하나\n", str(tpl))
+    root = etree.fromstring(zipfile.ZipFile(io.BytesIO(data)).read("word/numbering.xml"))
+    own = next(a for a in root.findall(qn("w:abstractNum")) if a.get(qn("w:abstractNumId")) == "900")
+    assert [lv.find(qn("w:lvlText")).get(qn("w:val")) for lv in own.findall(qn("w:lvl"))] == ["제%1장", "◆"]
+    assert note_abstract_texts(data)[0][0] == "(%1)"

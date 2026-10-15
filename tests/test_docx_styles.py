@@ -85,3 +85,54 @@ def test_custom_container_keeps_its_own_values_unless_yaml_sets_them(tmp_path):
     assert d.styles["Heading 1"].font.size.pt == 20
     assert d.styles["Body Text"].font.size.pt == 13
     assert round(d.sections[0].page_width.mm) == 150
+
+
+def styles_by_name(document):
+    """Styles keyed by their UI name; ``styles["Caption"]`` would fall back to a style-id lookup."""
+    return {s.name: s for s in document.styles}
+
+
+def company_reference(tpl, *, caption_base=None):
+    """A reference.docx with company paragraph styles 본문 (13pt, own font) and 캡션."""
+    from docx.enum.style import WD_STYLE_TYPE
+
+    ref = make_reference_docx(tpl / "reference.docx")
+    reference = docx.Document(str(ref))
+    body = reference.styles.add_style("본문", WD_STYLE_TYPE.PARAGRAPH)
+    body.font.size = Pt(13)
+    body.font.name = "Batang"
+    caption = reference.styles.add_style("캡션", WD_STYLE_TYPE.PARAGRAPH)
+    if caption_base:
+        caption.base_style = styles_by_name(reference)[caption_base]
+    reference.save(str(ref))
+    return ref
+
+
+def test_secondary_body_styles_follow_the_mapped_body_style(tmp_path):
+    tpl = write_template(tmp_path, "t", "name: t\nstyles: {body: {docx: 본문}, caption: {docx: 캡션}}\n")
+    company_reference(tpl)
+    d, ctx = render(tmp_path, "# 제목\n\n첫 문단\n\n둘째 문단\n\n- 하나\n- 둘\n\n![그림](none.png)\n", str(tpl))
+    styles = styles_by_name(d)
+    body_id = styles["본문"].style_id
+    by_text = {p.text: p.style.name for p in d.paragraphs}
+    assert by_text["첫 문단"] == "First Paragraph" and by_text["하나"] == "Compact"
+    assert by_text["둘째 문단"] == "본문"
+    for name in ("First Paragraph", "Compact"):
+        assert styles[name].element.basedOn_val == body_id, name
+    assert styles["First Paragraph"].font.size is None  # inherits 본문's 13pt
+    assert styles["Compact"].paragraph_format.space_after is not None  # keeps its tight spacing
+    caption_id = styles["캡션"].style_id
+    for name in ("Image Caption", "Caption"):
+        assert styles[name].element.basedOn_val == caption_id, name
+    assert not [e for e in ctx.report.events if e.code == Codes.STYLE_UNMAPPED]
+
+
+def test_secondary_style_the_target_is_based_on_is_not_rebased(tmp_path):
+    tpl = write_template(tmp_path, "t", "name: t\nstyles: {caption: {docx: 캡션}}\n")
+    company_reference(tpl, caption_base="Caption")
+    d, _ = render(tmp_path, "![그림](none.png)\n", str(tpl))
+    styles = styles_by_name(d)
+    company_id = styles["캡션"].style_id
+    assert styles["캡션"].element.basedOn_val == styles["Caption"].style_id
+    assert styles["Caption"].element.basedOn_val != company_id
+    assert styles["Image Caption"].element.basedOn_val == company_id

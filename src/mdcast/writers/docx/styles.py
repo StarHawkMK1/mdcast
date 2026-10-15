@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from docx.enum.section import WD_ORIENT
+from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.shared import Mm, Pt, RGBColor
@@ -61,6 +62,28 @@ def _by_name(d) -> dict[str, Any]:
     return {s.name: s for s in d.styles}
 
 
+def _rebase_secondaries(d, target: str, secondaries: list[str]) -> None:
+    """Base pandoc's secondary styles (First Paragraph, Compact, Image Caption, ...) on ``target``.
+
+    They keep their own deltas (Compact's tight spacing) and inherit the rest from the mapped
+    style. A secondary that ``target`` itself inherits from is skipped, or the chain would loop.
+    """
+    by_name = _by_name(d)
+    base = by_name[target]
+    if base.type != WD_STYLE_TYPE.PARAGRAPH:
+        return
+    chain: set[str] = set()
+    ancestor = base
+    while ancestor is not None and ancestor.name not in chain:
+        chain.add(ancestor.name)
+        ancestor = ancestor.base_style
+    for name in secondaries:
+        style = by_name.get(name)
+        if style is None or name in chain or style.type != WD_STYLE_TYPE.PARAGRAPH:
+            continue
+        style.base_style = base
+
+
 def remap_styles(d, config: dict[str, Any], report: Report) -> dict[str, list[str]]:
     names = _names(d)
     used: dict[str, list[str]] = {}
@@ -86,6 +109,7 @@ def remap_styles(d, config: dict[str, Any], report: Report) -> dict[str, list[st
             for p_style in d.element.body.iter(qn("w:pStyle")):
                 if p_style.get(qn("w:val")) == old_id:
                     p_style.set(qn("w:val"), new_id)
+        _rebase_secondaries(d, target, pandoc_names[1:])
         used[element] = [target, *pandoc_names[1:]]
     return used
 
