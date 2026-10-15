@@ -51,6 +51,9 @@ def _parse_levels(value: Any, ctx: FilterContext, template_levels: set[int]) -> 
             levels.add(_LEVELS[name])
         else:
             ctx.report.warn(Codes.TEMPLATE_INVALID, _WARN_MESSAGE, once=True, key="page_break")
+    if items and not levels:
+        # every name was invalid: keep the template's levels instead of disabling heading breaks
+        return template_levels
     return levels
 
 
