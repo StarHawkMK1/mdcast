@@ -94,12 +94,12 @@ def _roots(cwd: Path, home: Path) -> list[tuple[str, Path]]:
     ]
 
 
-def _looks_like_path(ref: str) -> bool:
+def looks_like_path(ref: str) -> bool:
     return "/" in ref or "\\" in ref or ref.startswith(".") or Path(ref).is_absolute()
 
 
 def find_template_dir(ref: str, cwd: Path, home: Path) -> tuple[Path, str] | None:
-    if _looks_like_path(ref):
+    if looks_like_path(ref):
         candidate = Path(ref)
         if not candidate.is_absolute():
             candidate = cwd / candidate

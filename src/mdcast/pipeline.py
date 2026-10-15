@@ -16,6 +16,7 @@ from mdcast.filters import FilterContext, run_filters
 from mdcast.readers.md import read_md
 from mdcast.report import Codes, Report
 from mdcast.templates import ResolvedTemplate, resolve_template
+from mdcast.templates.resolve import looks_like_path
 from mdcast.types import Format, Options, Output, Result, Source
 from mdcast.writers.context import RenderError, WriterContext
 from mdcast.writers.docx import write_docx
@@ -102,7 +103,12 @@ def convert(
         report.set_outputs(outputs)
         return Result(outputs, report)
 
-    ref = template or (str(document.frontmatter["template"]) if document.frontmatter.get("template") else None)
+    ref = template
+    if ref is None and document.frontmatter.get("template"):
+        ref = str(document.frontmatter["template"])
+        # a path written in the document is relative to the document, like its images
+        if looks_like_path(ref) and not Path(ref).is_absolute() and source.base_dir is not None:
+            ref = str(source.base_dir / ref)
     tpl = resolve_template(ref, cwd=options.cwd or Path.cwd(), home=options.home or Path.home(), report=report)
     report.template = tpl.info([o.format.value for o in outputs])
     fields = resolve_fields(document.frontmatter, tpl.config, report)

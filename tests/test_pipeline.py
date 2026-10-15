@@ -111,3 +111,29 @@ def test_generator_versions_reach_docx_custom_properties(tmp_path):
         custom = z.read("docProps/custom.xml").decode("utf-8")
     for key in ("mdcast.generator", "mdcast.pandoc", "mdcast.typst", "mdcast.template.name"):
         assert key in custom
+
+
+def test_relative_frontmatter_template_path_resolves_from_the_document_folder(tmp_path):
+    docs = tmp_path / "docs"
+    write_template(docs, "양식", "name: from-doc\n")
+    source = Source("---\ntemplate: ./양식\n---\n\n본문\n".encode(), "보고서.md", Format.MD, base_dir=docs)
+    result = pipeline.convert(source, [Format.DOCX], options=opts(tmp_path))
+    assert result.report.template.name == "from-doc"
+    assert Codes.TEMPLATE_NOT_FOUND not in [e.code for e in result.report.events]
+
+
+def test_explicit_template_path_still_resolves_from_cwd(tmp_path):
+    docs = tmp_path / "docs"
+    write_template(docs, "양식", "name: from-doc\n")
+    source = Source("본문\n".encode(), "보고서.md", Format.MD, base_dir=docs)
+    result = pipeline.convert(source, [Format.DOCX], "./양식", options=opts(tmp_path))
+    assert result.report.template.name == "default"
+    assert Codes.TEMPLATE_NOT_FOUND in [e.code for e in result.report.events]
+
+
+def test_frontmatter_template_name_is_not_treated_as_a_path(tmp_path):
+    docs = tmp_path / "docs"
+    write_template(docs, "rep", "name: wrong\n")
+    write_template(tmp_path / ".mdcast" / "templates", "rep", "name: rep\n")
+    source = Source("---\ntemplate: rep\n---\n\n본문\n".encode(), "보고서.md", Format.MD, base_dir=docs)
+    assert pipeline.convert(source, [Format.DOCX], options=opts(tmp_path)).report.template.name == "rep"

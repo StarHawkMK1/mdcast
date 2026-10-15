@@ -157,3 +157,13 @@ def test_unreadable_input_is_korean_error(env, monkeypatch):
     r = run("convert", str(md))
     assert r.exit_code == 1
     assert "입력 파일을 읽지 못했습니다" in r.output and "Traceback" not in r.output
+
+
+def test_frontmatter_template_path_is_relative_to_the_document(env):
+    docs = env / "docs"
+    write_template(docs, "양식", "name: doc-form\n")
+    path = write_md(docs, "보고서.md", "---\ntemplate: ./양식\n---\n\n본문\n")
+    r = run("convert", str(path.relative_to(env)), "--offline")
+    assert r.exit_code == 0, r.output
+    assert "템플릿: doc-form" in r.output
+    assert "찾지 못해" not in r.output
