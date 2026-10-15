@@ -6,6 +6,10 @@ import textwrap
 import zlib
 from pathlib import Path
 
+import docx
+import pypandoc
+from docx.enum.style import WD_STYLE_TYPE
+
 from mdcast.ast import clone
 from mdcast.fields import resolve_fields
 from mdcast.filters import FilterContext, run_filters
@@ -67,10 +71,6 @@ def make_reference_docx(
     footer_runs: list[str] | None = None,
     extra_styles: tuple[str, ...] = (),
 ) -> Path:
-    import docx
-    import pypandoc
-    from docx.enum.style import WD_STYLE_TYPE
-
     subprocess.run(
         [pypandoc.get_pandoc_path(), "-o", str(path), "--print-default-data-file", "reference.docx"],
         check=True,
