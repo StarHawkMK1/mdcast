@@ -12,7 +12,7 @@ from mdcast.writers.context import RenderError, WriterContext
 from mdcast.writers.docx.headers import apply_headers
 from mdcast.writers.docx.meta import apply_metadata
 from mdcast.writers.docx.numbering import apply_list_numbering
-from mdcast.writers.docx.styles import apply_elements, apply_page, remap_styles
+from mdcast.writers.docx.styles import apply_elements, apply_page, disable_autospace, remap_styles
 from mdcast.writers.docx.tables import apply_tables
 from mdcast.writers.images import localize_images
 
@@ -66,6 +66,8 @@ def write_docx(doc: pf.Doc, ctx: WriterContext) -> bytes:
     # a custom container's own style values beat the built-in default (spec 3.3):
     # apply only what the template yaml (or its parent) set explicitly
     looks = ctx.template.explicit if container_source == "custom" else config
+    if container_source != "custom":
+        disable_autospace(d)
     apply_page(d, looks)
     used = remap_styles(d, config, ctx.report)
     apply_elements(d, looks, used)

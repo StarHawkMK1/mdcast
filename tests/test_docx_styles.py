@@ -136,3 +136,29 @@ def test_secondary_style_the_target_is_based_on_is_not_rebased(tmp_path):
     assert styles["캡션"].element.basedOn_val == styles["Caption"].style_id
     assert styles["Caption"].element.basedOn_val != company_id
     assert styles["Image Caption"].element.basedOn_val == company_id
+
+
+def _autospace(d) -> dict[str, str | None]:
+    ppr = d.styles.element.find(qn("w:docDefaults")).find(qn("w:pPrDefault")).find(qn("w:pPr"))
+    return {tag: (el.get(qn("w:val")) if (el := ppr.find(qn(f"w:{tag}"))) is not None else None) for tag in ("autoSpaceDE", "autoSpaceDN")}
+
+
+def test_builtin_container_turns_off_korean_digit_autospace(tmp_path):
+    # Word widens "2026년" to "2026 년" by default; Typst does not, so the PDF would differ
+    d, _ = render(tmp_path, "2026년 4분기\n")
+    assert _autospace(d) == {"autoSpaceDE": "0", "autoSpaceDN": "0"}
+
+
+def test_custom_container_keeps_its_own_autospace(tmp_path):
+    tpl = write_template(tmp_path, "t", "name: t\n")
+    make_reference_docx(tpl / "reference.docx")
+    d, _ = render(tmp_path, "2026년 4분기\n", str(tpl))
+    assert _autospace(d) == {"autoSpaceDE": None, "autoSpaceDN": None}
+
+
+def test_default_captions_are_not_italic(tmp_path):
+    # pandoc's reference makes Caption italic; the PDF caption is upright
+    d, _ = render(tmp_path, "Table: 요약\n\n| a |\n|---|\n| 1 |\n")
+    styles = styles_by_name(d)
+    for name in ("Table Caption", "Caption"):
+        assert styles[name].font.italic is False

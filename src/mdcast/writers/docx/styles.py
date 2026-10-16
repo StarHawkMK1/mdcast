@@ -5,6 +5,7 @@ from typing import Any
 from docx.enum.section import WD_ORIENT
 from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Mm, Pt, RGBColor
 
@@ -52,6 +53,21 @@ def apply_page(d, config: dict[str, Any]) -> None:
         for key in ("top", "bottom", "left", "right"):
             if margin.get(key) is not None:
                 setattr(section, f"{key}_margin", Mm(parse_length_mm(margin[key])))
+
+
+def disable_autospace(d) -> None:
+    """Turn off Word's automatic spacing between Korean and Latin/digits ("2026 년").
+
+    Typst sets "2026년" tight, so the built-in container matches the PDF this way.
+    """
+    styles = d.styles.element
+    defaults = styles.find(qn("w:docDefaults"))
+    if defaults is None:
+        defaults = OxmlElement("w:docDefaults")
+        styles.insert(0, defaults)  # docDefaults comes first in w:styles
+    ppr = upsert(upsert(defaults, "w:pPrDefault"), "w:pPr")  # pPrDefault follows rPrDefault
+    upsert(ppr, "w:autoSpaceDE", PPR_ORDER, val=0)
+    upsert(ppr, "w:autoSpaceDN", PPR_ORDER, val=0)
 
 
 def _names(d) -> set[str]:
