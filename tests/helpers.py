@@ -200,3 +200,33 @@ def hwpx_integrity(data: bytes) -> dict:
     assert len(sec_prs) == 1
     assert sec_prs[0].getparent().getparent() is section[0]
     return parts
+
+
+def hwpx_settings(**changes):
+    """hwpx Settings with the built-in template's values, for writer tests below the adapter."""
+    from dataclasses import replace as _replace
+
+    from mdcast.hwpx.look import Look, Settings
+
+    body = Look(font="맑은 고딕", size=11, bold=False, italic=False, color="#000000", align="justify",
+                line_height=1.8, space_before=0, space_after=4, indent_left=0, keep_with_next=False)
+    looks = {
+        "body": body,
+        "quote": _replace(body, size=10.5, color="#555555", align="left", space_after=0, indent_left=5),
+        "code": Look(font="Consolas", size=9.5, bold=False, italic=False, color="#000000", align="left",
+                     line_height=1.3, space_before=0, space_after=0, indent_left=0, background="#F6F8FA"),
+        "caption": _replace(body, size=9.5, bold=True, align="center", line_height=1.3, space_after=0),
+        "footnote": _replace(body, size=9, align="left", line_height=1.3, space_after=0),
+    }
+    for level in range(1, 7):
+        looks[f"heading{level}"] = _replace(body, size=16 if level == 1 else 12, bold=True, align="left",
+                                            line_height=1.3, space_before=12, space_after=6, keep_with_next=True)
+    styles = {f"heading{level}": f"개요 {level}" for level in range(1, 7)}
+    styles.update(body="바탕글", quote="바탕글", code="바탕글", caption="캡션", footnote="각주")
+    markers = "□○-·"
+    values = dict(
+        looks=looks, styles=styles, body_size=11.0, body_line_height=1.8,
+        list_marker=lambda ordered, level, n: f"{n}." if ordered else markers[min(level, 4) - 1],
+    )
+    values.update(changes)
+    return Settings(**values)
