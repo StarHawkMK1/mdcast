@@ -43,6 +43,7 @@
   let inner = t.border.width * 1pt + rgb(t.border.color)
   let outer = t.border_outer.width * 1pt + rgb(t.border_outer.color)
   set text(size: t.font_size * 1pt)
+  set par(leading: 0.65em)  // single line spacing in cells, as in the docx tables
   set table.header(repeat: t.header.repeat)
   set table(
     inset: t.cell_padding * 1mm,

@@ -258,3 +258,28 @@ def test_failed_figure_with_id_adds_no_table_and_keeps_bookmark(tmp_path):
     assert "fig-a" in [b.get(qn("w:name")) for b in body.iter(qn("w:bookmarkStart"))]
     codes = [e.code for e in ctx.report.events]
     assert Codes.STYLE_UNMAPPED not in codes and Codes.RENDER_WARNING not in codes
+
+
+def cell_line_spacings(data: bytes) -> list[tuple[str | None, str | None]]:
+    body = part(data, "word/document.xml").find(qn("w:body"))
+    out = []
+    for p in body.iter(qn("w:p")):
+        if next((a for a in p.iterancestors() if a.tag == qn("w:tc")), None) is None:
+            continue
+        ppr = p.find(qn("w:pPr"))
+        spacing = None if ppr is None else ppr.find(qn("w:spacing"))
+        out.append((None, None) if spacing is None else (spacing.get(qn("w:line")), spacing.get(qn("w:lineRule"))))
+    return out
+
+
+def test_builtin_cells_use_single_line_spacing(tmp_path):
+    # the body's 160% made every row twice as tall as the PDF's
+    data = render(tmp_path, "| a | b |\n|---|---|\n| 1 | 2 |\n")
+    assert cell_line_spacings(data) == [("240", "auto")] * 4
+
+
+def test_custom_container_cells_keep_their_spacing(tmp_path):
+    tpl = write_template(tmp_path, "t", "name: t\n")
+    make_reference_docx(tpl / "reference.docx")
+    data = render(tmp_path, "| a | b |\n|---|---|\n| 1 | 2 |\n", str(tpl))
+    assert cell_line_spacings(data) == [(None, None)] * 4

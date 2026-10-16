@@ -14,6 +14,7 @@ from mdcast.units import normalize_color, parse_length_mm, parse_pt
 from mdcast.writers.docx.xml import (
     BORDER_ORDER,
     MAR_ORDER,
+    PPR_ORDER,
     RPR_ORDER,
     STYLE_ORDER,
     TBLPR_ORDER,
@@ -108,6 +109,20 @@ def _tr_pr(tr):
     return trpr
 
 
+def _single_spaced(tbl) -> None:
+    """Single line spacing in the cells, like the PDF's tables.
+
+    Direct formatting: the cells' paragraph style (Compact, based on the body's 160%) would
+    beat a table style's spacing.
+    """
+    for p in tbl.iter(qn("w:p")):
+        ppr = p.find(qn("w:pPr"))
+        if ppr is None:
+            ppr = OxmlElement("w:pPr")
+            p.insert(0, ppr)
+        upsert(ppr, "w:spacing", PPR_ORDER, line=240, lineRule="auto")
+
+
 def apply_tables(
     d,
     config: dict[str, Any],
@@ -192,6 +207,8 @@ def apply_tables(
             look_el.set(qn(f"w:{key}"), value)
         if s.get("width") == "full":
             upsert(tblpr, "w:tblW", TBLPR_ORDER, w=5000, type="pct")
+        if explicit is None:
+            _single_spaced(tbl)
         for tr in tbl.findall(qn("w:tr"))[: record["head_rows"]]:
             trpr = _tr_pr(tr)
             remove_all(trpr, "w:tblHeader")

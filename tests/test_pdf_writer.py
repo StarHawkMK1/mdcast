@@ -155,3 +155,29 @@ def test_label_of_an_inline_image_that_became_a_placeholder_survives(tmp_path):
     assert "[이미지: 설명]" in text and "참조" in text
     assert "<img-a>" in (ctx.work_dir / "main.typ").read_text(encoding="utf-8")
     assert Codes.IMAGE_FETCH_FAILED in [e.code for e in ctx.report.events]
+
+
+def _line_pitch(page, needle: str) -> float:
+    """Distance between the first two text lines of the paragraph that starts with ``needle``."""
+    textpage = page.get_textpage()
+    text = textpage.get_text_range()
+    start = text.index(needle)
+    tops: list[float] = []
+    for i in range(start, len(text)):
+        if not "가" <= text[i] <= "힣":  # Hangul syllables share one top edge
+            continue
+        top = round(textpage.get_charbox(i)[3], 1)
+        if not tops or abs(top - tops[-1]) > 2:
+            tops.append(top)
+        if len(tops) == 2:
+            return tops[0] - tops[1]
+    raise AssertionError(f"{needle!r} does not wrap")
+
+
+def test_table_cells_are_single_spaced_while_body_is_wider(tmp_path):
+    long = "줄 간격을 보기 위해 충분히 긴 문장을 씁니다. " * 6
+    md = f"본문{long}\n\n| 칸 |\n|---|\n| 셀{long} |\n"
+    page = pdfium.PdfDocument(render(tmp_path, md)[0])[0]
+    body, cell = _line_pitch(page, "본문"), _line_pitch(page, "셀")
+    # cells are 10pt: at the body's 160% they would sit at body * 10/11; single is clearly below
+    assert cell < body * 10 / 11 * 0.95
