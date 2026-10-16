@@ -1,14 +1,18 @@
 import pytest
 
+OPT_IN = {"visual": "--run-visual", "word": "--run-word"}
+
 
 def pytest_addoption(parser):
     parser.addoption("--run-visual", action="store_true", help="run visual golden-image tests")
+    parser.addoption("--run-word", action="store_true", help="run Microsoft Word parity tests (Windows + Word)")
 
 
 def pytest_collection_modifyitems(config, items):
-    if config.getoption("--run-visual"):
-        return
-    skip = pytest.mark.skip(reason="visual test: pass --run-visual")
-    for item in items:
-        if "visual" in item.keywords:
-            item.add_marker(skip)
+    for marker, option in OPT_IN.items():
+        if config.getoption(option):
+            continue
+        skip = pytest.mark.skip(reason=f"{marker} test: pass {option}")
+        for item in items:
+            if marker in item.keywords:
+                item.add_marker(skip)
