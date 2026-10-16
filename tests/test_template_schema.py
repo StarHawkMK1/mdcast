@@ -195,3 +195,27 @@ def test_logo_mapping_validated():
     r3 = new_report()
     cfg = sanitize(deep_merge(default, ok), default, r3)
     assert cfg["header"]["logo"]["height"] == "8mm" and r3.events == []
+
+
+def test_builtin_line_heights_are_all_set():
+    default = load_builtin_default()
+    expected = {f"heading{i}": "130%" for i in range(1, 7)} | {
+        "body": "160%", "quote": "160%", "code": "130%", "caption": "130%", "footnote": "130%",
+    }
+    assert {k: v["line_height"] for k, v in default["elements"].items()} == expected
+    assert default["tables"]["line_height"] == "130%"
+
+
+def test_table_line_height_validates_and_variants_may_override():
+    default = load_builtin_default()
+    r = new_report()
+    clean = validate_against(
+        {"tables": {"line_height": "150%", "variants": {"dense": {"line_height": "100%"}}}}, default, r
+    )
+    assert clean["tables"]["line_height"] == "150%"
+    assert clean["tables"]["variants"]["dense"]["line_height"] == "100%"
+    assert codes(r) == []
+    config = deep_merge(default, {"tables": {"line_height": "-5%"}})
+    r = new_report()
+    assert sanitize(config, default, r)["tables"]["line_height"] == "130%"
+    assert codes(r) == [Codes.TEMPLATE_INVALID]
