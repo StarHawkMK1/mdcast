@@ -47,3 +47,16 @@ def test_math_in_a_table_cell_grows(tmp_path):
 def test_math_in_a_footnote_grows(tmp_path):
     found = spacing_by_text(render(tmp_path, "본문[^1]\n\n[^1]: 각주 $\\frac{a}{b}$\n"), "word/footnotes.xml")
     assert found["각주"] == ("234", "atLeast")  # Footnote Text: 9pt × 130%
+
+
+def test_small_inline_math_keeps_the_exact_line(tmp_path):
+    # Word's "at least" falls back to the font's own single line (1.73 x size for Malgun Gothic),
+    # so loosening a paragraph whose math fits would make it taller than in the PDF
+    found = spacing_by_text(render(tmp_path, "식 $x^2$ 끝\n"), "word/document.xml")
+    assert found["식  끝"] == (None, None)
+
+
+def test_small_inline_image_keeps_the_exact_line(tmp_path):
+    (tmp_path / "a.png").write_bytes(tiny_png())
+    found = spacing_by_text(render(tmp_path, "앞 ![](a.png){width=2mm height=2mm} 뒤\n"), "word/document.xml")
+    assert found["앞  뒤"] == (None, None)

@@ -9,8 +9,12 @@ from lxml import etree
 
 from mdcast.writers.docx.xml import PPR_ORDER, upsert
 
-_MATH = "{http://schemas.openxmlformats.org/officeDocument/2006/math}oMath"
-_OBJECTS = (qn("w:drawing"), qn("w:pict"), qn("w:object"), _MATH)
+_M = "{http://schemas.openxmlformats.org/officeDocument/2006/math}"
+_EXTENT = "{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}extent"
+_OBJECTS = (qn("w:drawing"), qn("w:pict"), qn("w:object"), f"{_M}oMath")
+# math that stacks (fractions, big operators, radicals, matrices, limits) or stands on its own line
+_TALL_MATH = tuple(f"{_M}{tag}" for tag in ("f", "nary", "rad", "m", "eqArr", "limLow", "limUpp", "oMathPara"))
+_EMU_PER_TWIP = 635
 
 
 def _exact_in_style_chain(style_id: str | None, styles: dict[str, Any]) -> str | None:
@@ -39,13 +43,24 @@ def _exact_line(p, styles: dict[str, Any], default_id: str | None) -> str | None
     return _exact_in_style_chain(default_id, styles)
 
 
+def _needs_room(p, line: int) -> bool:
+    """Whether an object in ``p`` may be taller than an exact ``line`` (twips).
+
+    "At least" is not free: Word then uses the font's own single line where it is larger (1.73 ×
+    the size for Malgun Gothic), so a paragraph is loosened only when something would be clipped.
+    """
+    if next(p.iter(qn("w:pict"), qn("w:object"), *_TALL_MATH), None) is not None:
+        return True  # VML objects carry no size we can read; stacked math is taller than text
+    return any(int(extent.get("cy") or 0) > line * _EMU_PER_TWIP for extent in p.iter(_EXTENT))
+
+
 def _loosen(root, styles: dict[str, Any], default_id: str | None) -> bool:
     changed = False
     for p in root.iter(qn("w:p")):
         if not any(next(p.iter(tag), None) is not None for tag in _OBJECTS):
             continue
         line = _exact_line(p, styles, default_id)
-        if line is None:
+        if line is None or not _needs_room(p, int(line)):
             continue
         ppr = p.find(qn("w:pPr"))
         if ppr is None:
@@ -57,7 +72,7 @@ def _loosen(root, styles: dict[str, Any], default_id: str | None) -> bool:
 
 
 def loosen_inline_objects(d) -> None:
-    """Let paragraphs holding images or equations grow: an "exact" line would clip them."""
+    """Let paragraphs holding tall images or equations grow: an "exact" line would clip them."""
     styles = {s.get(qn("w:styleId")): s for s in d.styles.element.findall(qn("w:style"))}
     default = next(
         (s for s in styles.values() if s.get(qn("w:type")) == "paragraph" and s.get(qn("w:default")) in ("1", "true")),

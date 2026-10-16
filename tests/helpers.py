@@ -105,7 +105,8 @@ def line_pitch(data: bytes, needle: str) -> float:
     """Distance (pt) between the baselines of the first two text lines from ``needle`` on page 1.
 
     Baselines, not character boxes: a box's top follows the glyph's outline, so lines starting
-    with different syllables would seem up to ~1pt apart.
+    with different syllables would seem up to ~1pt apart. The text is read per character index
+    (``get_text_range`` can drift from those indices, e.g. around math).
     """
     import ctypes
 
@@ -113,11 +114,12 @@ def line_pitch(data: bytes, needle: str) -> float:
     import pypdfium2.raw as pdfium_c
 
     textpage = pdfium.PdfDocument(data)[0].get_textpage()
-    text = textpage.get_text_range()
+    count = pdfium_c.FPDFText_CountChars(textpage.raw)
+    text = "".join(chr(pdfium_c.FPDFText_GetUnicode(textpage.raw, i) or 0xFFFD) for i in range(count))
     x, y = ctypes.c_double(), ctypes.c_double()
     baselines: list[float] = []
     for i in range(text.index(needle), len(text)):
-        if text[i].isspace():
+        if not "가" <= text[i] <= "힣":  # body text only: a superscript sits off the baseline
             continue
         pdfium_c.FPDFText_GetCharOrigin(textpage.raw, i, ctypes.byref(x), ctypes.byref(y))
         if not baselines or abs(y.value - baselines[-1]) > 2:
