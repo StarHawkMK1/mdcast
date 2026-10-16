@@ -43,6 +43,15 @@ M2a 의 대상이 아닌 것: hwpx 가져오기(M3), 수식 이미지(M4), `temp
 
 결과가 이 문서의 가정과 다르면, 그 항목의 설계를 고쳐 이 문서에 반영한 뒤 진행한다.
 
+**2026-10-16 수행 완료.** 결과는 부록 A 에 있다. 가정과 다른 점(길이 단위 2배, 내어쓰기 방향, 줄 안 글자 위치, 첫 문단 처리, 빈 값의 처리)은 §4–§6 에 반영했다.
+
+추가로 확인한 항목:
+
+12. 문단 모양 여백 값의 단위
+13. 첫 문단에 secPr 와 첫 블록 글자를 함께 넣는 방식
+14. 가로 방향 표현
+15. 목록 내어쓰기와 기호 뒤 탭
+
 ## 4. 구조
 
 ### 4.1 독립 패키지 `src/mdcast/hwpx/`
@@ -53,7 +62,7 @@ mdcast 의 다른 모듈을 import 하지 않는다 (상위 스펙 §2). 의존�
 |---|---|
 | `container.py` | zip 읽기·쓰기. 다시 묶을 때 `mimetype` 을 첫 항목·무압축으로 두고, 나머지는 원래 순서와 압축 방식을 지킨다 |
 | `header.py` | header.xml 편집. 글자 모양·문단 모양·테두리/배경·탭 정의를 추가하고 새 ID 를 돌려준다. 같은 정의는 재사용하고 `itemCnt` 를 갱신한다. 스타일을 이름으로 찾는다 |
-| `section.py` | AST → section0.xml 본문. 첫 문단의 `secPr` 는 유지한다 |
+| `section.py` | AST → section0.xml 본문. 그릇 첫 문단의 `secPr`·`colPr` 런을 **첫 블록의 문단 맨 앞으로 옮긴다** (빈 첫 문단을 남기지 않는다, 부록 A-13) |
 | `meta.py` | content.hpf 메타데이터, `Preview/PrvText.txt`, settings.xml 커서 위치 |
 | `look.py` | 입력 값 객체 (§4.3) |
 | `__init__.py` | 공개 진입점 `write(...)` |
@@ -93,6 +102,17 @@ def write(
 
 `Look` 는 한 요소의 모양이다. 모든 필드는 선택이고, `None` 은 그릇 값을 그대로 둔다는 뜻이다.
 
+어댑터가 `None` 을 넘기는 규칙은 그릇에 따라 다르다.
+- **내장 그릇**에서는 yaml 의 빈 값(null)을 PDF 가 실제로 쓰는 값으로 바꿔 넘긴다. 한글 빈 문서의 기본값(개요 들여쓰기, 함초롬 글꼴, 머리말 9pt 150% 등)이 새어 들지 않게 하려는 것이다.
+  - 들여쓰기·앞뒤 간격: 0
+  - 굵게·기울임: 아니오
+  - 색: 검정
+  - 정렬: 왼쪽
+  - 줄 높이: 130%
+  - 배경: 없음
+  - 다음 문단과 함께: 아니오
+- **사용자 그릇**에서는 yaml 에 적힌 값만 넘기고 나머지는 `None` 이다.
+
 | 필드 | 단위 | yaml |
 |---|---|---|
 | `font` | 글꼴 이름 | `fonts.body/heading/code.family` |
@@ -113,6 +133,7 @@ def write(
 `src/mdcast/builtin_templates/default/reference.hwpx`:
 - 한글 COM 으로 새 빈 문서를 hwpx 로 저장한 파일이다.
 - 만드는 스크립트는 `scripts/make_reference_hwpx.py` 에 둔다.
+- 저장소가 공개이므로, 스크립트는 저장 뒤 content.hpf 의 작성자·날짜 메타데이터와 `Preview/PrvText.txt` 를 비운다.
 
 사용자 템플릿에 reference.hwpx 가 없으면 내장 그릇을 쓴다 (`TEMPLATE_CONTAINER_FALLBACK`, 기존 로직).
 
@@ -142,21 +163,32 @@ reference.hwpx 가 깨져 있는 경우:
 | 글꼴 | `fontfaces` 의 각 언어 묶음(한글·영문 등)에 글꼴을 추가하고 charPr `fontRef` 로 가리킨다 |
 | `align` | paraPr `align horizontal` = LEFT/CENTER/RIGHT/JUSTIFY |
 | `line_height` N% | paraPr `lineSpacing type="PERCENT" value="N"` |
-| `space_before/after` | paraPr `margin` 의 `prev`/`next` (HWPUNIT) |
-| `indent_left` | paraPr `margin` 의 `left` (HWPUNIT) |
+| `space_before/after` | paraPr `margin` 의 `prev`/`next` (**HWPUNIT × 2**) |
+| `indent_left` | paraPr `margin` 의 `left` (**HWPUNIT × 2**) |
 | `keep_with_next` | paraPr `breakSetting keepWithNext="1"` |
 | `background` | 문단 테두리/배경용 borderFill 을 추가하고 paraPr `border borderFillIDRef` 로 가리킨다 |
 
 HWPUNIT 은 1/7200 인치다. mm → `round(mm × 7200 / 25.4)`, pt → `round(pt × 100)`.
+
+단위가 값마다 다르다 (부록 A-12에서 측정).
+- **HWPUNIT 의 2배로 쓰는 값:**
+  - paraPr `margin` 의 `left`·`right`·`intent`·`prev`·`next`
+  - tabPr `tabItem` 의 `pos`
+- **HWPUNIT 그대로 쓰는 값:**
+  - `pagePr` 의 크기와 여백
+  - paraPr `border` 의 `offset*`
+  - subList 의 `textWidth`·`textHeight`
+- 이 차이는 `hwpx/units.py` 의 두 함수(`hwpunit`, `para_unit`)로만 다룬다. 구조 테스트로 값마다 단위를 고정한다.
 
 ### 5.2 제목
 
 - "개요 N" 스타일을 쓴다. 개요 수준이 살아 있어야 한글의 개요 보기·차례 만들기가 된다.
 - 한글 개요는 번호를 자동으로 붙인다. 그래서 그 개요 스타일이 쓰는 번호 정의(`numbering`)에서 **수준별 번호 서식 문자열을 비운다**.
 - 제목 번호는 docx·pdf 와 똑같이 mdcast 번호 필터가 넣은 텍스트만 쓴다.
-- 서식을 비운 결과는 §3 의 8번 견본으로 확인한다.
-  - 빈 서식이 한글에서 문제가 되면, 제목 문단 모양의 `heading type` 을 `NONE` 으로 바꿔 개요 수준을 포기한다.
-  - 이때 이 문서에 기록한다.
+- 비우는 대상은 각 수준(`paraHead`)의 서식 문자열이다. 함께 번호 뒤 간격 `textOffset` 을 0 으로 한다.
+  - 간격을 그대로 두면 번호가 없어도 제목이 약 1.8mm 오른쪽에서 시작한다 (부록 A-8).
+  - 이렇게 하면 제목 글자가 본문과 같은 x 에서 시작한다. `GetTextFile` 결과에는 제목 앞에 공백 하나가 남지만, 화면과 PDF 에는 보이지 않는다.
+- 제목 문단 모양은 개요 스타일의 paraPr 를 복사하고 왼쪽 여백을 `indent_left`(내장 그릇에서는 0)로 바꾼다. 한글 개요 1–3 은 수준마다 왼쪽 여백이 있다.
 - 사용자 그릇에서도 번호 서식은 비운다. 번호의 출처를 mdcast 하나로 두기 위해서다.
 
 ### 5.3 개조식 목록
@@ -164,9 +196,16 @@ HWPUNIT 은 1/7200 인치다. mm → `round(mm × 7200 / 25.4)`, pt → `round(p
 - 기호를 **텍스트로** 문단 맨 앞에 넣는다.
   - 기호는 `lists.bullet`·`lists.ordered` 이고, 번호는 `counters.format_counter` 로 만든다.
   - 기호 뒤에는 탭을 하나 넣는다.
-- 수준마다 문단 모양을 하나 만든다.
-  - 왼쪽 여백 = 수준 × `lists.indent_per_level`
-  - 내어쓰기 = 기호 칸 너비
+- 수준마다 문단 모양을 하나 만든다. 번호 목록과 글머리표 목록은 따로 만든다.
+- 한글의 내어쓰기는 **둘째 줄부터 오른쪽으로 민다** (부록 A-15). 첫 줄은 `left` 에서 시작하고, 둘째 줄부터는 `left + 내어쓰기` 에서 시작한다. 그래서 각 값을 이렇게 정한다.
+  - `left` = 기호 위치. 수준마다 `lists.indent_per_level` 씩 늘지만, 윗 수준의 글자 위치보다 왼쪽으로 가지는 않는다 (docx 와 같은 규칙).
+  - `intent` = −내어쓰기
+  - 내어쓰기 = 그 수준에서 가장 넓은 기호의 폭 + 0.5em (최소 3mm)
+    - 번호 목록은 1–10번 기호 중 가장 넓은 것을 쓴다.
+    - 폭은 docx 와 같은 어림셈이다: 한글·전각 글자 1em, 나머지 0.55em.
+- 기호 뒤 탭이 첫 줄 글자를 둘째 줄과 같은 위치로 보내도록, 문단 모양은 "내어 쓰기용 자동 탭" 이 켜진 탭 정의(`tabPr autoTabLeft="1"`, 탭 항목 없음)를 가리킨다.
+  - 내장 그릇에는 id 1 로 이미 있다. 사용자 그릇에 없으면 추가한다.
+  - 기호가 내어쓰기보다 넓으면 탭이 기본 탭 위치로 넘어가 정렬이 어긋난다. 내어쓰기를 기호 폭으로 정하는 이유다.
 - 줄 높이와 간격은 본문(`body`) 값이다. docx·pdf 와 같다.
 - 한글 고유의 번호·글머리표 정의는 쓰지 않는다 (2026-10-16 결정).
   - 텍스트 기호를 쓰는 쪽이 결과가 확실하고 docx·pdf 와 모양을 맞추기 쉽다.
@@ -179,7 +218,7 @@ HWPUNIT 은 1/7200 인치다. mm → `round(mm × 7200 / 25.4)`, pt → `round(p
 | 요소 | 출력 |
 |---|---|
 | 인용 | `quote` 모양: 왼쪽 여백, 색, 크기. 안의 블록은 각자 매핑하되 왼쪽 여백만 더한다 |
-| 코드 블록 | 한 문단에 줄마다 줄 바꿈(`lineBreak`)을 넣는다. 코드 글꼴을 쓴다. 배경은 문단 테두리/배경, 안쪽 여백은 2mm (PDF 와 같음) |
+| 코드 블록 | 한 문단에 줄마다 줄 바꿈(`lineBreak`)을 넣는다. 코드 글꼴을 쓴다. 배경은 문단 테두리/배경이다. 한글의 배경은 글자 영역에서 `offset` 만큼 바깥으로 넓어지므로, 문단 왼쪽·오른쪽 여백과 `offset` 을 모두 2mm 로 둔다. 그러면 배경은 본문 폭에 맞고, 글자는 PDF 처럼 2mm 안쪽에서 시작한다. 연속 문단을 위해 `connect="1"` 로 둔다 |
 | 가로줄 | 아래 테두리만 있는 빈 문단 |
 | 정의 목록 | 용어는 굵은 본문 문단, 정의는 한 수준 들여쓴 본문 문단 |
 | 줄 블록 | 한 문단에 줄 바꿈 |
@@ -190,7 +229,14 @@ HWPUNIT 은 1/7200 인치다. mm → `round(mm × 7200 / 25.4)`, pt → `round(p
 - 굵게, 기울임, 밑줄, 취소선, 위/아래 첨자, 인라인 코드:
   - 문단의 글자 모양을 바탕으로 조합마다 charPr 를 하나 만들어 재사용한다.
   - 인라인 코드는 코드 글꼴과 크기를 쓴다.
-- 링크는 한글 고유의 하이퍼링크다 (XML 은 §3 의 5번).
+- 링크는 한글 고유의 하이퍼링크 필드다 (부록 A-5).
+  - 구조: `fieldBegin`(type HYPERLINK) 런 → 링크 글자 런 → `fieldEnd` 런.
+  - `fieldid` 는 상수 627600491 (`'%hlk'`)이다.
+  - `id` 는 문서 안에서 겹치지 않는 수다.
+  - `Command` 는 URL 의 `\`·`:`·`;` 를 `\` 로 escape 한 뒤 `;1;0;0;` 를 붙인 값이다.
+  - `Path` 는 URL 원문이다.
+  - 링크 글자는 파랑(#0000FF) 밑줄이다 (한글 기본, docx Hyperlink 스타일과 같음).
+- 문서 안 링크(`#id`)는 글자만 쓴다. 책갈피는 M2b 이후다.
 - 줄 바꿈 처리:
   - `SoftBreak` 는 공백이다.
   - `LineBreak` 는 문단 안 줄 바꿈이다.
@@ -214,19 +260,50 @@ HWPUNIT 은 1/7200 인치다. mm → `round(mm × 7200 / 25.4)`, pt → `round(p
 
 첫 문단 `secPr` 의 `pagePr` 를 고친다.
 - 크기와 방향:
-  - 용지 폭·높이를 HWPUNIT 으로 넣는다.
-  - 가로 방향이면 `landscape` 값을 바꾼다. 정확한 값은 견본으로 확인한다.
+  - `width`·`height` 는 용지의 세로 방향 치수(HWPUNIT)다.
+  - 세로 방향은 `landscape="WIDELY"`, 가로 방향은 `landscape="NARROWLY"` 로 쓴다 (부록 A-14).
 - 내장 그릇에는 yaml 전체를, 사용자 그릇에는 yaml 에 적힌 값만 넣는다.
 
-한글은 본문 시작 위치를 "위쪽 여백 + 머리말 높이" 로 정한다 (§3 의 9번에서 확인). yaml 의 `margin.top` 은 본문 시작 위치를 뜻하므로 두 값으로 나눈다.
+**여백 나누기.** 한글의 본문 시작 위치는 "위쪽 여백 + 머리말 높이" 다 (부록 A-9). 본문 끝도 같은 방식으로 "아래쪽 여백 + 꼬리말 높이" 만큼 위다. yaml 의 `margin.top`/`margin.bottom` 은 본문 시작·끝 위치를 뜻하므로 그대로 나눠 쓴다.
 
-- 위쪽 여백(`top`) = PDF 에서 머리말이 놓이는 위치 (Typst 기본: 머리말 아래 끝이 위 여백의 70% 지점)에서 머리말 한 줄 높이를 뺀 값
-  - 머리말 한 줄 높이 = `body.size` × `body.line_height`. PDF 머리말이 본문 글자 설정을 물려받기 때문이다. hwpx 머리말 문단도 `body` 모양을 쓴다.
-- 머리말 높이(`header`) = `margin.top` − `top`
-- 아래쪽(`bottom`, `footer`)도 같은 방식이다.
-- `top` 이 0 이하가 되면 `top` = 0, `header` = `margin.top` 으로 둔다.
+**글자 위치 모형** (부록 A-9, A-10 측정):
+- 크기 s, 줄 높이 비율 r 인 한 줄은 한글에서 줄 위쪽 끝으로부터 0.85·s 아래에 기준선이 있고, 남는 높이는 모두 기준선 아래로 간다.
+- PDF(`_lines(r)`)는 기준선이 줄 위쪽 끝으로부터 (0.8 + (r−1)/2)·s 아래다.
 
-결과적으로 세 형식의 본문 시작 위치가 같다. 머리말 위치는 §8.3 으로 PDF 와 비교한다.
+**머리말·꼬리말 문단 모양.** 머리말·꼬리말 문단은 `body` 의 글자 크기와 줄 높이를 쓴다. PDF 머리말이 본문 글자 설정을 물려받기 때문이다.
+
+머리말과 꼬리말이 yaml 칸(`source: yaml`)일 때의 배치는 아래와 같다. 길이는 mm, T = `margin.top`, B = `margin.bottom` 이다.
+
+1. **PDF 머리말 기준선.**
+   - PDF 머리말 블록 아래 끝은 0.7·T 에 있다 (Typst `header-ascent` 30%).
+   - `line: below` 이면 그 위에 1.5mm 간격과 0.5pt 선이 있다.
+   - 기준선 y_h = 0.7·T − (선 있으면 1.5 + 0.18) − (0.2 + (r−1)/2)·s
+2. **한글 머리말.**
+   - `top` = max(0, y_h − 0.85·s)
+   - `header` = T − `top`
+   - 머리말 영역 세로 정렬은 위쪽(`vertAlign="TOP"`)이다.
+3. **PDF 꼬리말 기준선**(본문 끝에서 아래로 잰 거리).
+   - y_f = 0.3·B + (`line: above` 이면 1.5 + 0.18) + (0.8 + (r−1)/2)·s
+4. **한글 꼬리말.**
+   - `bottom` = 0, `footer` = B
+   - 꼬리말 영역 세로 정렬은 위쪽이다.
+   - 꼬리말 문단의 위 간격(`prev`) = max(0, y_f − 0.85·s)
+   - 그러면 꼬리말 영역이 본문 끝에서 시작하고, 기준선이 PDF 와 같은 곳에 온다.
+   - 위 간격이 머리말·꼬리말 영역 첫 문단에도 적용되는지는 한글 COM 테스트(§8.3)로 확인한다.
+5. **선.**
+   - `line: below` 는 문단 아래 테두리다. `offsetBottom` = max(0, 1.5 + (0.55 − r/2)·s)
+   - `line: above` 는 문단 위 테두리다. `offsetTop` = max(0, 1.5 + ((r−1)/2 − 0.05)·s)
+6. 사용자 그릇의 머리말을 그대로 쓰는 경우(`source: reference`):
+   - `top` = max(0, T − 그릇의 `header`)
+   - `bottom` = max(0, B − 그릇의 `footer`)
+   - 그릇 머리말·꼬리말 높이는 유지한다.
+
+결과적으로 세 형식의 본문 시작·끝 위치가 같다. 머리말·꼬리말 기준선은 PDF 와 1mm 안에서 맞춘다 (§8.3).
+
+**알려진 차이:**
+- 위 모형대로 본문 각 줄의 기준선은 PDF 보다 ((r−1)/2 − 0.05)·s 위에 온다. 본문 11pt·180% 에서 약 1.4mm 다.
+- 줄 피치는 같지만, 줄 높이가 다른 문단이 바뀌는 곳(제목→본문)마다 몇 pt 차이가 생긴다.
+- M2a 에서는 맞추지 않고 기록만 한다. 맞추려면 PDF·docx 의 줄 안 글자 위치를 바꿔야 하고, 그러면 골든을 다시 승인받아야 하기 때문이다. 사용자 결정 사항으로 남긴다.
 
 ### 6.2 머리말·꼬리말
 
@@ -234,14 +311,19 @@ HWPUNIT 은 1/7200 인치다. mm → `round(mm × 7200 / 25.4)`, pt → `round(p
 - 그릇의 해당 머리말(또는 꼬리말) 컨트롤을 모두 지운다.
 - 양쪽 공통(`applyPageType="BOTH"`) 컨트롤을 하나 넣는다.
 - 내용은 문단 하나다.
-  - header.xml 에 탭 정의를 하나 추가한다. 가운데 탭은 본문 폭의 1/2, 오른쪽 탭은 본문 폭 끝이다.
-  - 왼쪽·가운데·오른쪽 칸을 탭으로 나눈다 (docx 와 같은 방식).
+  - header.xml 에 탭 정의를 하나 추가한다. 가운데 탭은 본문 폭의 1/2, 오른쪽 탭은 본문 폭 끝이다. `pos` 는 HWPUNIT × 2 다.
+  - 왼쪽·가운데·오른쪽 칸을 탭(`<hp:tab width="0" leader="0" type="1"/>`, 한글이 열 때 폭을 다시 잰다)으로 나눈다 (docx 와 같은 방식).
+  - subList `textWidth` = 본문 폭, `textHeight` = 머리말(꼬리말) 높이 (HWPUNIT).
+  - 문단 스타일은 그릇의 "머리말" 스타일이다. 없으면 바탕글이다.
 - 필드 처리:
   - `{{page}}` 는 쪽 번호 컨트롤(`autoNum numType="PAGE"`)이다.
   - `{{pages}}` 는 전체 쪽 수(`numType="TOTAL_PAGE"`)이다.
   - 나머지 필드는 텍스트다.
 - `line: below/above` 이면 문단 아래/위 테두리를 그린다.
-- 첫 쪽 감춤(`pageHiding`)의 머리말·꼬리말 감춤은 끈다. docx 에서 yaml 머리말일 때 titlePg 를 끄는 것과 같은 규칙이다.
+- 첫 쪽 감춤은 끈다. docx 에서 yaml 머리말일 때 titlePg 를 끄는 것과 같은 규칙이다.
+  - `secPr/visibility` 의 `hideFirstHeader`/`hideFirstFooter` 를 "0" 으로 둔다.
+  - 그릇 본문에 있던 `hp:pageHiding` 컨트롤은 본문과 함께 사라진다 (본문을 새로 만들기 때문).
+  - 내장 그릇에는 둘 다 없어서 견본을 채취하지 않았다.
 
 `source: reference` 인 경우:
 - 그릇의 머리말을 그대로 두고, 그 안 텍스트의 `{{키}}` 만 채운다.
@@ -252,7 +334,9 @@ HWPUNIT 은 1/7200 인치다. mm → `round(mm × 7200 / 25.4)`, pt → `round(p
 `Contents/content.hpf` 의 `opf:metadata`:
 - 제목·작성자·키워드는 frontmatter 에서 가져온다. docx core 속성과 같은 값이다.
 - mdcast 생성 정보는 docx 사용자 지정 속성과 같은 키(`mdcast.generator`, `mdcast.template.name`, `mdcast.template.version`, `mdcast.template.source`, `mdcast.pandoc`, `mdcast.typst`)로 `opf:meta` 에 넣는다.
-- 한글이 모르는 meta 이름을 거부하면(§3 의 11번) 생성 정보는 빼고, 이 문서에 기록한다.
+- 한글은 모르는 meta 이름이 있어도 문서를 연다. 다만 한글에서 다시 저장하면 그 항목은 사라진다 (부록 A-11). mdcast 가 만든 파일 그대로일 때만 생성 정보가 남는다.
+- 제목은 `opf:title`, 작성자는 `opf:meta name="creator"`, 키워드는 `opf:meta name="keyword"` 다 (한글이 쓰는 이름).
+- `CreatedDate`·`ModifiedDate` 는 변환 시각(UTC, `YYYY-MM-DDThh:mm:ssZ`)으로 쓴다. `date` 는 비운다.
 
 그 밖의 파일:
 - `Preview/PrvText.txt` 에 본문 앞부분 텍스트를 다시 쓴다. 그릇의 미리보기 텍스트가 남지 않게 하려는 것이다.
@@ -303,9 +387,10 @@ HWPUNIT 은 1/7200 인치다. mm → `round(mm × 7200 / 25.4)`, pt → `round(p
 
 줄 간격 비교 (`tests/test_hangul_parity.py`):
 - 한글이 저장한 PDF 와 mdcast PDF 에서 `helpers.line_pitch` 로 본문·제목·목록·코드의 줄 피치를 잰다.
-- 목표 오차는 0.5% (Word 비교와 같음).
-- 한글의 "글자에 따라 N%" 가 글자 크기 × N/100 과 다르면 측정값과 함께 보고하고, 변환식을 정해 이 문서에 기록한다.
-- 본문 시작 위치와 머리말 위치도 PDF 와 비교한다.
+- 목표 오차는 0.5% (Word 비교와 같음). 견본에서는 0.1–0.3% 였다 (부록 A-10).
+- 제목·본문·목록 둘째 줄·목록 첫 줄 글자의 x 를 PDF 와 비교한다 (0.5mm 안).
+- 머리말·꼬리말 기준선을 PDF 와 비교한다 (1mm 안, §6.1).
+- 본문 첫 줄 기준선은 §6.1 의 알려진 차이 값과 비교한다 (0.5mm 안).
 
 보안 모듈:
 - 등록하지 않으면 COM 실행마다 "접근 허용" 대화상자가 뜨고, 사람이 눌러야 테스트가 진행된다.
@@ -325,6 +410,105 @@ HWPUNIT 은 1/7200 인치다. mm → `round(mm × 7200 / 25.4)`, pt → `round(p
 - 사용자 시각 확인 승인.
 - README 에 hwpx 출력, 낮춰 출력하는 요소, 보안 모듈 안내가 반영된다.
 
-## 부록 A. 견본 채취 결과
+## 부록 A. 견본 채취 결과 (2026-10-16)
 
-(§3 작업에서 채운다.)
+스크립트는 `spikes/m2_samples/` 에 있다 (`capture.py`: 한글 동작으로 저장, `author*.py`: 손으로 만든 변형, `judge.py`: 한글로 열기·PDF·재저장).
+- 기준 그릇은 한글 빈 문서 + 쪽 나눔 견본이다.
+- 측정은 한글이 저장한 PDF 의 글자 기준선 위치(pypdfium2)로 했다.
+- "재저장" 은 한글이 그 파일을 다시 hwpx 로 저장한 결과다.
+
+**A-1 쪽 나눔.** 다음 문단의 `pageBreak="1"`.
+```xml
+<hp:p id="0" paraPrIDRef="0" styleIDRef="0" pageBreak="1" columnBreak="0" merged="0"><hp:run charPrIDRef="0"><hp:t>나</hp:t></hp:run></hp:p>
+```
+
+**A-2 머리말·꼬리말.**
+- 첫 문단의 런 안 `hp:ctrl` 이다.
+- 꼬리말은 `hp:footer` 이고 구조가 같다.
+- COM `HeaderFooter` 의 `Type` 1 은 꼬리말이 아니라 짝수 쪽 머리말을 만들었다. 꼬리말 XML 은 손으로 만들었고, 한글 재저장으로 확인했다.
+```xml
+<hp:ctrl><hp:header id="1" applyPageType="BOTH"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP" linkListIDRef="0" linkListNextIDRef="0" textWidth="42520" textHeight="4252" hasTextRef="0" hasNumRef="0"><hp:p id="0" paraPrIDRef="9" styleIDRef="13" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="2"><hp:t>왼쪽<hp:tab width="2256" leader="0" type="1"/>쪽 </hp:t>…</hp:run></hp:p></hp:subList></hp:header></hp:ctrl>
+```
+
+**A-3 쪽 번호.** 런 안 `hp:ctrl`. 전체 쪽 수는 `numType="TOTAL_PAGE"`.
+```xml
+<hp:ctrl><hp:autoNum num="1" numType="PAGE"><hp:autoNumFormat type="DIGIT" userChar="" prefixChar="" suffixChar="" supscript="0"/></hp:autoNum></hp:ctrl>
+```
+
+**A-4 탭.**
+- 탭 정의는 `<hh:tabPr id autoTabLeft="0" autoTabRight="0"><hh:tabItem pos type="CENTER|RIGHT|LEFT" leader="NONE"/></hh:tabPr>` 이다.
+- `pos` 는 **HWPUNIT × 2** 로 읽힌다.
+  - 가운데 탭 `pos=21260` 에서 가운데 칸이 37.5mm 지점에 놓였다.
+  - `pos=42520` 으로 바꾸니 75mm(본문 가운데) 지점에 놓였다.
+- 본문의 탭 문자 `<hp:tab width="0" leader="0" type="1"/>` 는 받아들여진다. 한글이 열 때 폭과 종류를 다시 잰다.
+- 머리말 `왼쪽칸 / 가운데칸 / 오른칸` 이 30.1mm / 가운데 105mm / 오른쪽 끝 179.9mm 에 놓였다.
+
+**A-5 하이퍼링크.**
+- 링크 글자 런을 `fieldBegin` 과 `fieldEnd` 가 감싼다.
+- `fieldid` 627600491 = 0x25686C6B = `'%hlk'` (상수).
+- 손으로 만든 필드도 열린다. `Command` 의 `\:`·`\;` escape 는 재저장 뒤에도 유지된다.
+- 한글은 재저장할 때 `Path` 를 쿼리 없는 형태(`https://example.com/a`)로 다시 쓴다. `Command` 에는 전체 URL 이 남는다.
+- 실제로 클릭해서 이동하는지는 시각 확인(§8.4)에서 사람이 본다.
+```xml
+<hp:run charPrIDRef="0"><hp:ctrl><hp:fieldBegin id="1221991324" type="HYPERLINK" name="" editable="0" dirty="1" zorder="-1" fieldid="627600491"><hp:parameters cnt="6" name=""><hp:integerParam name="Prop">0</hp:integerParam><hp:stringParam name="Command">https\://example.com/a?b=1&amp;c=2\;d=3#frag;1;0;0;</hp:stringParam><hp:stringParam name="Path">https://example.com/a</hp:stringParam><hp:stringParam name="Category">HWPHYPERLINK_TYPE_URL</hp:stringParam><hp:stringParam name="TargetType">HWPHYPERLINK_TARGET_BOOKMARK</hp:stringParam><hp:stringParam name="DocOpenType">HWPHYPERLINK_JUMP_CURRENTTAB</hp:stringParam></hp:parameters></hp:fieldBegin></hp:ctrl></hp:run>
+<hp:run charPrIDRef="7"><hp:t>링크글</hp:t></hp:run>
+<hp:run charPrIDRef="0"><hp:ctrl><hp:fieldEnd beginIDRef="1221991324" fieldid="627600491"/></hp:ctrl><hp:t> 뒤</hp:t></hp:run>
+```
+- 링크 글자 charPr 은 `textColor="#0000FF"` + `<hh:underline type="BOTTOM" shape="SOLID" color="#0000FF"/>` 이다.
+
+**A-6 문단 테두리/배경.**
+- borderFill 은 테두리 `NONE` + `<hc:fillBrush><hc:winBrush faceColor="#F6F8FA" hatchColor="#999999" alpha="0"/></hc:fillBrush>` 다.
+- paraPr 는 `<hh:border borderFillIDRef offsetLeft offsetRight offsetTop offsetBottom connect="1" ignoreMargin="0"/>` 다.
+- 연속 문단의 배경이 하나로 이어진다.
+- `offset*` 은 HWPUNIT 그대로이고, 배경이 글자 영역 바깥으로 그만큼 넓어진다 (567 → 약 2mm).
+- 가로줄: `bottomBorder type="SOLID" width="0.12 mm"` borderFill 을 가리키는 빈 문단이다.
+
+**A-7 줄 바꿈.** `<hp:t>가<hp:lineBreak/>나</hp:t>`.
+
+**A-8 개요 번호.**
+- `numbering id=1` 의 각 `paraHead` 글자(`^1.` 등)를 비우면 번호가 사라진다.
+- 그러나 `textOffset="50"`(%) 때문에 제목이 약 1.8mm 오른쪽에서 시작했다. `textOffset="0"` 으로 하면 제목 x 가 본문 x 와 같다.
+- 개요 1–3 의 paraPr 는 왼쪽 여백이 있어(`left` 2000·4000·6000 → 3.5·7.1·10.6mm) 복사 후 0 으로 바꿔야 한다.
+- 개요 문단은 `heading type="OUTLINE" idRef="0" level="0..6"` 이다.
+
+**A-9 여백과 본문 시작.**
+- 위쪽 여백 20mm 일 때, 머리말 15mm 이면 첫 기준선이 43.6mm, 머리말 0mm 이면 28.6mm 였다. 차이가 15.0mm 이므로 본문 시작 = `top` + `header` 다.
+- 기준선은 줄 위쪽 끝에서 0.85·s 아래다 (10pt 160% 에서 3.0mm, lineseg `baseline=850`/`vertsize=1000` 과 같음).
+- 머리말 글자 기준선도 `top` + 0.85·s 였다 (9pt, `top` 20mm → 22.7mm).
+
+**A-10 줄 간격.**
+
+| 측정 | 결과 | 기대 |
+|---|---|---|
+| 11pt, `PERCENT 180` | 19.78pt | 19.8pt |
+| 16pt, `PERCENT 130` | 20.74pt | 20.8pt |
+| 10pt, `PERCENT 100` | 3.51mm | 3.53mm |
+
+**A-11 메타데이터.**
+- `opf:meta name="mdcast.generator"` 가 있어도 열린다. 재저장하면 사라진다.
+- 제목·작성자·키워드는 `opf:title`, `creator`, `keyword` 그대로 유지된다.
+- 한글이 새로 저장하면 `creator` 에 Windows 사용자 이름이 들어간다. 그래서 내장 그릇에서는 비운다 (§4.4).
+
+**A-12 문단 여백 단위.**
+- 10pt 100% 문단에 `left=2834`, `prev=2000`, `next=2000` 을 넣고 쟀다.
+  - 둘째 줄 글자 x = 5.0mm (2834 → 1417 HWPUNIT)
+  - 앞 간격 = 3.53mm, 뒤 간격 = 3.53mm (2000 → 1000 HWPUNIT)
+- 즉 paraPr `margin` 값은 **HWPUNIT × 2** 다. 한글 개요 1 의 `left=2000` 이 한글 화면의 "왼쪽 여백 10pt" 인 것과도 맞는다.
+- 양수 `intent`(첫 줄 들여쓰기)는 예상과 다르게 나왔다 (1417 → 12.5mm). mdcast 는 양수 `intent` 를 쓰지 않으므로 더 조사하지 않았다.
+
+**A-13 첫 문단.**
+- secPr 런을 첫 블록 문단(개요 제목 포함) 맨 앞에 넣으면, 빈 첫 줄 없이 그 블록이 첫 줄에 놓인다.
+- 빈 첫 문단을 남기면 모든 기준선이 한 줄 아래로 밀린다.
+
+**A-14 가로 방향.**
+- `landscape="NARROWLY"` + 세로 치수(59528×84186), `landscape="WIDELY"` + 바꾼 치수(84186×59528) 둘 다 296.7×209.9mm 쪽이 된다.
+- 재저장해도 각자 그대로 남는다.
+- mdcast 는 앞의 형태(세로 치수 + `NARROWLY`)를 쓴다. 세로 방향 그릇은 `WIDELY` 다.
+
+**A-15 목록 내어쓰기와 탭.**
+- `left=5668`, `intent=-2834` (값 그대로, 즉 10mm / 5mm) 문단에서 첫 줄은 10mm, 둘째 줄부터는 15mm 에서 시작했다. 한글의 내어쓰기는 둘째 줄을 오른쪽으로 민다.
+- 탭 정의에 탭 항목이 없으면, 기호 뒤 탭은 기본 탭 간격(secPr `tabStop`)으로 가서 글자가 14.1mm 에 놓였다. 둘째 줄과 어긋난다.
+- 다음 두 방법 모두 첫 줄 글자가 둘째 줄과 같은 15.0mm 에 놓였다.
+  - `autoTabLeft="1"` 탭 정의(내장 그릇 id 1)
+  - 15mm 위치의 `LEFT` 탭 항목
+- 기호 `(가)` 처럼 내어쓰기(5mm)보다 넓은 기호는 탭이 다음 기본 탭 위치로 넘어갔다.
