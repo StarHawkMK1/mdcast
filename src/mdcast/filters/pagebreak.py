@@ -24,6 +24,8 @@ def break_block(target: Format) -> pf.RawBlock:
         return raw_block('<w:p><w:r><w:br w:type="page"/></w:r></w:p>', "openxml")
     if target is Format.PDF:
         return raw_block("#pagebreak()", "typst")
+    if target is Format.HWPX:
+        return raw_block("pagebreak", "mdcast-hwpx")  # read by mdcast.hwpx.section
     return raw_block("<!-- pagebreak -->", "html")
 
 

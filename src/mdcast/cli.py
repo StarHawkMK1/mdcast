@@ -84,7 +84,7 @@ def main() -> None:
 
 @main.command()
 @click.argument("input_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
-@click.option("--to", "to", default="docx", show_default=True, help="출력 포맷, 쉼표로 구분 (docx,pdf)")
+@click.option("--to", "to", default="docx", show_default=True, help="출력 포맷, 쉼표로 구분 (docx,hwpx,pdf)")
 @click.option("--template", default=None, help="템플릿 이름 또는 폴더 경로")
 @click.option("--out-dir", type=click.Path(file_okay=False, path_type=Path), default=None, help="출력 폴더 (기본: 입력 파일 폴더)")
 @click.option("--json", "as_json", is_flag=True, help="리포트를 JSON 으로 출력")

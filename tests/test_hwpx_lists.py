@@ -54,7 +54,7 @@ def test_second_paragraph_of_an_item_aligns_with_its_text():
 
 
 def test_item_starting_with_code_block():
-    header, shapes, paragraphs, _ = hwpx_render("-   ```\n    코드\n    ```\n")
+    header, _, paragraphs, _ = hwpx_render("-   ```\n    코드\n    ```\n")
     assert hwpx_texts(paragraphs) == ["□", "코드"]
     code_left = header.para_left(paragraphs[1].get("paraPrIDRef"))
     assert abs(code_left - (hanging_mm(["□"], 11) + 2.0)) < 0.01  # item text + code padding

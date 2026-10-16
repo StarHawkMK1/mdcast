@@ -51,7 +51,11 @@ def test_out_dir(env):
     assert (env / "out 폴더" / "보고 서.docx").is_file()
 
 
-def test_unsupported_target_exits_1_but_writes_others(env):
+def test_unsupported_target_exits_1_but_writes_others(env, monkeypatch):
+    from mdcast import pipeline
+    from mdcast.types import Format
+
+    monkeypatch.delitem(pipeline.WRITERS, Format.HWPX)
     r = run("convert", str(write_md(env)), "--to", "docx,hwpx")
     assert r.exit_code == 1
     assert (env / "보고 서.docx").is_file()

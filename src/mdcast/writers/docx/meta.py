@@ -10,27 +10,12 @@ from lxml import etree
 
 from mdcast.fields import ResolvedFields
 from mdcast.report import Codes, Report
+from mdcast.writers.generator import generator_values
 
 CUSTOM_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.custom-properties+xml"
 _NS_CP = "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties"
 _NS_VT = "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"
 _FMTID = "{D5CDD505-2E9C-101B-9397-08002B2CF9AE}"
-
-
-def _custom_values(generator: dict[str, Any]) -> dict[str, str]:
-    template = generator.get("template") or {}
-    mdcast = generator.get("generator")
-    if not mdcast and generator.get("mdcast"):
-        mdcast = f"mdcast {generator['mdcast']}"
-    values = {
-        "mdcast.generator": mdcast,
-        "mdcast.template.name": template.get("name"),
-        "mdcast.template.version": template.get("version"),
-        "mdcast.template.source": template.get("source"),
-        "mdcast.pandoc": generator.get("pandoc"),
-        "mdcast.typst": generator.get("typst"),
-    }
-    return {k: str(v) for k, v in values.items() if v not in (None, "")}
 
 
 def _parse(blob: bytes):
@@ -94,4 +79,4 @@ def apply_metadata(d, generator: dict[str, Any], fields: ResolvedFields, report:
     author = fields.values.get("author")
     if author:
         props.author = author
-    _write_custom_properties(d, _custom_values(generator), report)
+    _write_custom_properties(d, generator_values(generator), report)

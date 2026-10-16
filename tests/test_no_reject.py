@@ -26,6 +26,7 @@ CASES = {
     "self-extends": ("name: self-extends\nextends: self-extends\n", {}, Codes.TEMPLATE_INVALID),
     "bad-reference-docx": ("name: x\n", {"reference.docx": b"not a zip"}, Codes.TEMPLATE_INVALID),
     "bad-pdf-layout": ("name: x\n", {"pdf.typ": b"#let conf = ("}, Codes.TEMPLATE_INVALID),
+    "bad-reference-hwpx": ("name: x\n", {"reference.hwpx": b"not a zip"}, Codes.TEMPLATE_INVALID),
     "unknown-font": (
         "fonts: {body: {family: 없는글꼴, fallback: []}, heading: {family: 없는글꼴}}\n",
         {},
@@ -56,7 +57,7 @@ FRONTMATTER_CASES = {
 def _convert(tmp_path: Path, source: Source, template: str | None):
     return pipeline.convert(
         source,
-        [Format.DOCX, Format.PDF],
+        [Format.DOCX, Format.HWPX, Format.PDF],
         template,
         Options(offline=True, cwd=tmp_path, home=tmp_path / "home"),
     )
@@ -73,7 +74,7 @@ def test_broken_templates_never_reject(tmp_path, case, fixture):
         (directory / filename).write_bytes(data)
     source = Source(fixture.read_bytes(), fixture.name, Format.MD, base_dir=fixture.parent)
     result = _convert(tmp_path, source, case)
-    assert len(result.outputs) == 2
+    assert len(result.outputs) == 3
     assert all(o.data for o in result.outputs), [e.to_dict() for e in result.report.events]
     if expected is not None:
         assert expected in [e.code for e in result.report.events]
@@ -84,7 +85,7 @@ def test_broken_frontmatter_never_rejects(tmp_path, case):
     text, expected = FRONTMATTER_CASES[case]
     source = Source(text.encode("utf-8"), "doc.md", Format.MD, base_dir=tmp_path)
     result = _convert(tmp_path, source, None)
-    assert len(result.outputs) == 2
+    assert len(result.outputs) == 3
     assert all(o.data for o in result.outputs), [e.to_dict() for e in result.report.events]
     assert expected in [e.code for e in result.report.events]
 

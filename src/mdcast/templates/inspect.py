@@ -4,6 +4,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+from mdcast import hwpx
 from mdcast.fields import RESERVED, keys_in
 from mdcast.fonts import missing_primary_fonts
 from mdcast.report import Codes, Report
@@ -11,7 +12,9 @@ from mdcast.templates.resolve import ResolvedTemplate, resolve_template
 from mdcast.templates.schema import load_builtin_default
 from mdcast.types import Format
 
-SUPPORTED_TARGETS = ["docx", "pdf"]
+HWPX_HEAD = "http://www.hancom.co.kr/hwpml/2011/head"
+
+SUPPORTED_TARGETS = ["docx", "hwpx", "pdf"]
 
 
 def _paragraph_texts(container: Any) -> Iterator[str]:
@@ -110,12 +113,35 @@ def _check_docx_styles(tpl: ResolvedTemplate, report: Report) -> None:
         )
 
 
+def _check_hwpx_styles(tpl: ResolvedTemplate, report: Report) -> None:
+    container = tpl.container_for("hwpx")
+    if container.source != "custom" or container.path is None:
+        return
+    try:
+        package = hwpx.Package.read(container.path.read_bytes())
+        header = hwpx.Header(package.xml("Contents/header.xml"))
+        names = {style.get("name") for style in header.root.iter(f"{{{HWPX_HEAD}}}style")}
+    except (hwpx.ContainerError, OSError) as exc:
+        report.warn(Codes.TEMPLATE_INVALID, f"reference.hwpx 를 읽을 수 없습니다: {exc}", format="hwpx")
+        return
+    for element, mapping in (tpl.config.get("styles") or {}).items():
+        name = (mapping or {}).get("hwpx") if isinstance(mapping, dict) else None
+        if name and name not in names:
+            report.warn(
+                Codes.STYLE_UNMAPPED,
+                f"hwpx 기준 문서에 스타일 '{name}' ({element}) 이(가) 없습니다 — 변환 시 바탕글을 씁니다",
+                format="hwpx",
+                element=element,
+            )
+
+
 def validate_template(ref: str, *, cwd: Path, home: Path) -> tuple[ResolvedTemplate, Report]:
     report = Report(str(ref), Format.MD)
     tpl = resolve_template(str(ref), cwd=cwd, home=home, report=report)
     for fmt in ("docx", "hwpx"):
         tpl.note_container_fallbacks(fmt, report)
     _check_docx_styles(tpl, report)
+    _check_hwpx_styles(tpl, report)
     try:
         missing = missing_primary_fonts(tpl.config.get("fonts") or {})
     except Exception as exc:  # noqa: BLE001 - font probing must not break validation

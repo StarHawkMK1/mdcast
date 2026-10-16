@@ -18,7 +18,7 @@ def test_describe_lists_fields_from_slots_and_defaults(tmp_path):
     assert info["fields"] == ["dept", "security", "owner"]
     assert "page" in info["reserved_fields"]
     assert info["formats"]["pdf"]["container"] == "builtin"
-    assert info["supported_targets"] == ["docx", "pdf"]
+    assert info["supported_targets"] == ["docx", "hwpx", "pdf"]
 
 
 def test_describe_reads_reference_docx_placeholders(tmp_path):

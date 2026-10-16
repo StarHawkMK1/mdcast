@@ -20,10 +20,12 @@ from mdcast.templates.resolve import looks_like_path
 from mdcast.types import Format, Options, Output, Result, Source
 from mdcast.writers.context import RenderError, WriterContext
 from mdcast.writers.docx import write_docx
+from mdcast.writers.hwpx import write_hwpx
 from mdcast.writers.pdf import write_pdf
 
 WRITERS: dict[Format, Callable[[pf.Doc, WriterContext], bytes]] = {
     Format.DOCX: write_docx,
+    Format.HWPX: write_hwpx,
     Format.PDF: write_pdf,
 }
 

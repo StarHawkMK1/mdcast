@@ -37,7 +37,8 @@ def test_md_to_docx_and_pdf(tmp_path):
     assert result.report.template.name == "default"
 
 
-def test_unsupported_target_fails_only_that_target(tmp_path):
+def test_unsupported_target_fails_only_that_target(tmp_path, monkeypatch):
+    monkeypatch.delitem(pipeline.WRITERS, Format.HWPX)
     result = pipeline.convert(src("본문\n"), [Format.DOCX, Format.HWPX], options=opts(tmp_path))
     assert statuses(result) == {"docx": "ok", "hwpx": "failed"}
     errors = [(e.code, e.where.get("format")) for e in result.report.events if e.level is Level.ERROR]

@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from mdcast.hwpx.container import Package  # noqa: E402
+from mdcast.hwpx.container import Package
 
 TARGET = ROOT / "src/mdcast/builtin_templates/default/reference.hwpx"
 OPF = "{http://www.idpf.org/2007/opf/}"
