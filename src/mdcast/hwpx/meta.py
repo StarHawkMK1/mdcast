@@ -8,7 +8,7 @@ from lxml import etree
 
 from mdcast.hwpx.container import Package
 from mdcast.hwpx.look import Metadata
-from mdcast.hwpx.section import hp
+from mdcast.hwpx.section import clean, hp
 
 OPF = "http://www.idpf.org/2007/opf/"
 HA = "http://www.hancom.co.kr/hwpml/2011/app"
@@ -35,11 +35,11 @@ def apply_metadata(package_root: etree._Element, md: Metadata) -> None:
     title = metadata.find(_opf("title"))
     if title is None:
         title = etree.SubElement(metadata, _opf("title"))
-    title.text = md.title or None
+    title.text = clean(md.title) or None
     values = {"creator": md.author, "keyword": md.keywords, "CreatedDate": md.created,
               "ModifiedDate": md.created, "date": "", **dict(md.extra)}
     for name, value in values.items():
-        _meta(metadata, name).text = value or None
+        _meta(metadata, name).text = clean(value or "") or None
 
 
 def keep_first_section(package: Package, package_root: etree._Element) -> None:

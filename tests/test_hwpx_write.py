@@ -75,3 +75,28 @@ def test_hwpx_package_imports_only_itself():
     for path in SRC.glob("*.py"):
         for match in pattern.finditer(path.read_text(encoding="utf-8")):
             assert match.group(1) == "hwpx", f"{path.name}: {match.group(0).strip()}"
+
+
+def test_control_characters_anywhere_still_give_a_file():
+    import panflute as pf
+
+    from mdcast.hwpx import PageNumber, Slots
+
+    doc = pf.Doc(pf.Para(pf.Str("가￾나"), pf.Link(pf.Str("링크"), url="https://a.b/\x0bc")))
+    settings = hwpx_settings(
+        header=Slots(left=("머리\x0b말",)), footer=Slots(center=(PageNumber("page"), "\x01")),
+        metadata=Metadata(title="제\x01목"),
+    )
+    data, _ = write(doc, builtin_hwpx(), settings)
+    parts = hwpx_integrity(data)
+    assert parts["Contents/content.hpf"].find(f"{OPF}metadata/{OPF}title").text == "제목"
+
+
+def test_section_count_follows_the_dropped_sections():
+    package = Package.read(builtin_hwpx())
+    head = package.xml("Contents/header.xml")
+    head.set("secCnt", "2")
+    package.set_xml("Contents/header.xml", head)
+    package.set("Contents/section1.xml", package.get("Contents/section0.xml"))
+    data, _ = write(md_to_doc("본문\n"), package.write(), hwpx_settings())
+    assert hwpx_integrity(data)["Contents/header.xml"].get("secCnt") == "1"

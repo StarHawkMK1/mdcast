@@ -16,6 +16,7 @@ from mdcast.hwpx.units import hwpunit
 
 RULE = 1.5 + 0.18  # mm: the PDF's gap between a header row and its 0.5pt rule, plus the rule
 BASELINE = 0.85  # Hangul: baseline below a line's top, in font sizes (appendix A-9)
+SECTION_CONTROLS = ("header", "footer", "pageNum", "pageHiding")
 
 
 @dataclass(frozen=True)
@@ -202,6 +203,10 @@ def assemble(section: etree._Element, paragraphs: list[etree._Element], header: 
     kept = _controls(section, kinds)
     first_id = section.find(hp("p")).get("id", "0")
     sec_run.getparent().remove(sec_run)
+    # section-level controls Hangul keeps in the secPr run: drop the ones mdcast replaces
+    for ctrl in sec_run.findall(hp("ctrl")):
+        if ctrl not in kept and any(ctrl.find(hp(k)) is not None for k in SECTION_CONTROLS):
+            sec_run.remove(ctrl)
     for ctrl in kept:
         ctrl.getparent().remove(ctrl)
     for child in section.findall(hp("p")):

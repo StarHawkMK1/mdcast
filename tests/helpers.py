@@ -188,7 +188,13 @@ def hwpx_integrity(data: bytes) -> dict:
     for style in head.iter(hh("style")):
         assert style.get("paraPrIDRef") in paras and style.get("charPrIDRef") in chars
         assert style.get("nextStyleIDRef") in styles
+    sections = [n for n in parts if n.startswith("Contents/section")]
+    if head.get("secCnt") is not None:
+        assert int(head.get("secCnt")) == len(sections)
     section = parts["Contents/section0.xml"]
+    for kind in ("header", "footer"):
+        pages = [c.get("applyPageType") for c in section.iter(hp(kind))]
+        assert len(pages) == len(set(pages)), f"two {kind}s for the same pages"
     for p in section.iter(hp("p")):
         assert p.get("paraPrIDRef") in paras and p.get("styleIDRef") in styles
     for run in section.iter(hp("run")):

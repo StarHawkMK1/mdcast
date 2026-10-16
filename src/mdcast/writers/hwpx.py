@@ -159,7 +159,7 @@ def write_hwpx(doc: pf.Doc, ctx: WriterContext) -> bytes:
     if container.source == "custom" and container.path is not None:
         try:
             return _write(doc, container.path.read_bytes(), ctx, custom=True)
-        except (hwpx.ContainerError, OSError) as exc:
+        except Exception as exc:  # noqa: BLE001 - any odd container: the built-in one still works
             ctx.report.warn(
                 Codes.TEMPLATE_INVALID,
                 f"커스텀 reference.hwpx 를 쓸 수 없어 내장 그릇으로 변환합니다: {exc}",

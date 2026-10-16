@@ -27,6 +27,8 @@ def write(doc: pf.Doc, container: bytes, settings: Settings) -> tuple[bytes, lis
     assemble(section, paragraphs, header, shapes, settings)
     apply_metadata(content, settings.metadata)
     keep_first_section(package, content)
+    if header.root.get("secCnt") is not None:
+        header.root.set("secCnt", "1")  # only section0 is written
     package.set_xml("Contents/header.xml", header.root)
     package.set_xml("Contents/section0.xml", section)
     package.set_xml("Contents/content.hpf", content)

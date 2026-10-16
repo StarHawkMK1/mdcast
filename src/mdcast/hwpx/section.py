@@ -18,7 +18,7 @@ HP = "http://www.hancom.co.kr/hwpml/2011/paragraph"
 PAGE_BREAK = ("mdcast-hwpx", "pagebreak")  # raw block the pagebreak filter writes for hwpx
 LINK_COLOR = "#0000FF"  # Hangul's own link look (appendix A-5)
 HYPERLINK_FIELD = "627600491"  # '%hlk'
-_CONTROL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_CONTROL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f￾￿]")  # not allowed in XML
 _GAP_EM = 0.5  # between a list marker and its text, as the docx writer
 _MIN_HANGING_MM = 3.0
 _DEGRADED = {
@@ -33,8 +33,14 @@ def hp(tag: str) -> str:
     return f"{{{HP}}}{tag}"
 
 
+def clean(text: str) -> str:
+    """``text`` without characters XML cannot hold (pasted text may carry them)."""
+    return _CONTROL.sub("", text)
+
+
 def append_text(t: etree._Element, text: str) -> None:
     """Add text at the end of an ``hp:t`` that may already hold tab or line-break children."""
+    text = clean(text)
     if len(t):
         t[-1].tail = (t[-1].tail or "") + text
     else:
@@ -81,7 +87,7 @@ class Paragraph:
         return self._text
 
     def text(self, char: str, value: str) -> None:
-        value = _CONTROL.sub("", value).replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+        value = clean(value).replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
         for index, part in enumerate(value.split("\t")):
             if index:
                 self.mark(char, "tab")
@@ -359,7 +365,8 @@ class SectionWriter:
 
     def link(self, paragraph: Paragraph, item: pf.Link, char: str) -> None:
         """Hangul hyperlink field around the link text (appendix A-5); ``#id`` links stay text."""
-        if not item.url or item.url.startswith("#"):
+        url = clean(item.url or "")
+        if not url or url.startswith("#"):
             self.inlines(paragraph, item.content, char)
             return
         field = str(next(self._fields))
@@ -370,8 +377,8 @@ class SectionWriter:
         params = etree.SubElement(begin, hp("parameters"), cnt="6", name="")
         etree.SubElement(params, hp("integerParam"), name="Prop").text = "0"
         for name, value in (
-            ("Command", escape_command(item.url) + ";1;0;0;"),
-            ("Path", item.url),
+            ("Command", escape_command(url) + ";1;0;0;"),
+            ("Path", url),
             ("Category", "HWPHYPERLINK_TYPE_URL"),
             ("TargetType", "HWPHYPERLINK_TARGET_BOOKMARK"),
             ("DocOpenType", "HWPHYPERLINK_JUMP_CURRENTTAB"),

@@ -109,3 +109,15 @@ def test_code_hangul_text_uses_the_body_font(tmp_path):
     latin = head.find(".//hh:fontface[@lang='LATIN']", NS)
     assert hangul.find(f"hh:font[@id='{ref.get('hangul')}']", NS).get("face") == "맑은 고딕"
     assert latin.find(f"hh:font[@id='{ref.get('latin')}']", NS).get("face") == "Consolas"
+
+
+def test_odd_custom_container_falls_back(tmp_path):
+    package = Package.read(builtin_hwpx())
+    head = package.xml("Contents/header.xml")
+    head.find(".//hh:fontface[@lang='HANGUL']", NS).set("lang", "OTHERSCRIPT")  # no Hangul group
+    package.set_xml("Contents/header.xml", head)
+    yaml_text = "name: t\nfonts: {body: {family: 맑은 고딕}}\n"  # code's Hangul face needs that group
+    tpl = write_template(tmp_path, "t", yaml_text, {"reference.hwpx": package.write()})
+    parts, ctx = render(tmp_path, "```\n코드\n```\n", str(tpl))
+    assert body_para(parts, "코드") is not None
+    assert Codes.TEMPLATE_INVALID in [e.code for e in ctx.report.events]

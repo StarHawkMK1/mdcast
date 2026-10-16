@@ -132,3 +132,16 @@ def test_reference_header_is_kept_and_filled():
     assert texts == "제목값 쪽 "
     assert [n.get("numType") for n in p.iter(f"{{{NS['hp']}}}autoNum")] == ["PAGE"]
     assert len(section.findall(".//hp:header", NS)) == 1 and len(section.findall(".//hp:footer", NS)) == 1
+
+
+def test_container_controls_in_the_section_run_do_not_double_a_yaml_header():
+    # Hangul keeps section-level controls in the secPr run; a yaml header must replace them
+    _, section, package = build()
+    first = section[0]
+    sec_run, ctrl_run = first[0], first[1]
+    for ctrl in list(ctrl_run):
+        sec_run.append(ctrl)
+    first.remove(ctrl_run)
+    package.set_xml("Contents/section0.xml", section)
+    _, section, _ = build(container=package.write())
+    assert len(section.findall(".//hp:header", NS)) == 1 and len(section.findall(".//hp:footer", NS)) == 1
