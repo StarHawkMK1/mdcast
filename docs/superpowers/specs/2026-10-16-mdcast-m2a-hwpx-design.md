@@ -135,7 +135,7 @@ def write(
 - 만드는 스크립트는 `scripts/make_reference_hwpx.py` 에 둔다.
 - 저장소가 공개이므로, 스크립트는 저장 뒤 content.hpf 의 작성자·날짜 메타데이터와 `Preview/PrvText.txt` 를 비운다.
 
-사용자 템플릿에 reference.hwpx 가 없으면 내장 그릇을 쓴다 (`TEMPLATE_CONTAINER_FALLBACK`, 기존 로직).
+사용자 템플릿에 reference.hwpx 가 없으면 내장 그릇을 쓴다 (`TEMPLATE_CONTAINER_FALLBACK`, 기존 로직). `ResolvedTemplate.builtin_container("hwpx")` 는 지금 `path=None`("엔진 기본")을 돌려주므로, pdf 처럼 내장 파일 경로를 돌려주게 바꾼다.
 
 reference.hwpx 가 깨져 있는 경우:
 - zip 이 아니거나, header.xml·section0.xml 이 없거나, XML 오류가 있으면 해당한다.
@@ -218,7 +218,7 @@ HWPUNIT 은 1/7200 인치다. mm → `round(mm × 7200 / 25.4)`, pt → `round(p
 | 요소 | 출력 |
 |---|---|
 | 인용 | `quote` 모양: 왼쪽 여백, 색, 크기. 안의 블록은 각자 매핑하되 왼쪽 여백만 더한다 |
-| 코드 블록 | 한 문단에 줄마다 줄 바꿈(`lineBreak`)을 넣는다. 코드 글꼴을 쓴다. 배경은 문단 테두리/배경이다. 한글의 배경은 글자 영역에서 `offset` 만큼 바깥으로 넓어지므로, 문단 왼쪽·오른쪽 여백과 `offset` 을 모두 2mm 로 둔다. 그러면 배경은 본문 폭에 맞고, 글자는 PDF 처럼 2mm 안쪽에서 시작한다. 연속 문단을 위해 `connect="1"` 로 둔다 |
+| 코드 블록 | 한 문단에 줄마다 줄 바꿈(`lineBreak`)을 넣는다. 코드 글꼴을 쓴다. 배경은 문단 테두리/배경이다. 한글의 배경은 글자 영역에서 `offset` 만큼 바깥으로 넓어지므로, 문단 왼쪽·오른쪽 여백과 `offset` 을 모두 2mm 로 둔다. 그러면 배경은 본문 폭에 맞고, 글자는 PDF 처럼 2mm 안쪽에서 시작한다. 배경이 위아래로 2mm 넓어지는 만큼 문단 앞뒤 간격에도 2mm 를 더한다 (PDF 블록의 안쪽 여백이 이웃을 밀어내는 것과 같게). 코드 블록은 한 문단이므로 `connect="0"` 으로 두어, 이어진 두 코드 블록이 PDF 처럼 따로 보이게 한다 |
 | 가로줄 | 아래 테두리만 있는 빈 문단 |
 | 정의 목록 | 용어는 굵은 본문 문단, 정의는 한 수준 들여쓴 본문 문단 |
 | 줄 블록 | 한 문단에 줄 바꿈 |
@@ -388,7 +388,8 @@ HWPUNIT 은 1/7200 인치다. mm → `round(mm × 7200 / 25.4)`, pt → `round(p
 줄 간격 비교 (`tests/test_hangul_parity.py`):
 - 한글이 저장한 PDF 와 mdcast PDF 에서 `helpers.line_pitch` 로 본문·제목·목록·코드의 줄 피치를 잰다.
 - 목표 오차는 0.5% (Word 비교와 같음). 견본에서는 0.1–0.3% 였다 (부록 A-10).
-- 제목·본문·목록 둘째 줄·목록 첫 줄 글자의 x 를 PDF 와 비교한다 (0.5mm 안).
+- 제목·본문 글자의 x 를 PDF 와 비교한다 (0.5mm 안).
+- 목록은 첫 줄 글자 x 와 둘째 줄 x 가 같은지 본다 (0.5mm 안). PDF 와는 비교하지 않는다. PDF 목록은 한 단계 더 들여쓰는 것이 M1 부터의 알려진 차이이고, hwpx 는 docx 규칙을 따른다.
 - 머리말·꼬리말 기준선을 PDF 와 비교한다 (1mm 안, §6.1).
 - 본문 첫 줄 기준선은 §6.1 의 알려진 차이 값과 비교한다 (0.5mm 안).
 
@@ -512,3 +513,14 @@ HWPUNIT 은 1/7200 인치다. mm → `round(mm × 7200 / 25.4)`, pt → `round(p
   - `autoTabLeft="1"` 탭 정의(내장 그릇 id 1)
   - 15mm 위치의 `LEFT` 탭 항목
 - 기호 `(가)` 처럼 내어쓰기(5mm)보다 넓은 기호는 탭이 다음 기본 탭 위치로 넘어갔다.
+
+**A-16 글자 모양** (`capture_chars.py`, 한글 동작으로 저장).
+- 굵게·기울임·위첨자·아래첨자는 각각 `<hh:bold/>`, `<hh:italic/>`, `<hh:supscript/>`, `<hh:subscript/>` 이다.
+- 취소선은 `<hh:strikeout shape="SOLID" color="#000000"/>`, 밑줄은 `<hh:underline type="BOTTOM" shape="SOLID" color="…"/>` 이다.
+- 모두 `fontRef`·`ratio`·`spacing`·`relSz`·`offset` 다음에 온다.
+- 글꼴을 맑은 고딕으로 바꾸면 한글은 7개 언어 묶음 모두에 다음 항목을 넣는다.
+  ```xml
+  <hh:font face="맑은 고딕" type="TTF" isEmbedded="0"><hh:typeInfo familyType="FCAT_GOTHIC" weight="5" proportion="3" contrast="2" strokeVariation="0" armStyle="0" letterform="2" midline="0" xHeight="4"/></hh:font>
+  ```
+  - 한글은 이 글꼴을 목록 맨 앞(id 0)에 넣고 나머지 id 를 다시 매겼다. mdcast 는 목록 끝에 덧붙인다. id 로만 가리키므로 어느 쪽이든 된다.
+  - 각 묶음의 `fontCnt` 도 함께 바뀐다.
