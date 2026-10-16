@@ -20,6 +20,7 @@ from mdcast.writers.docx.styles import (
     disable_autospace,
     remap_styles,
     tighten_compact,
+    unfix_code_size,
 )
 from mdcast.writers.docx.tables import apply_tables
 from mdcast.writers.images import localize_images
@@ -77,6 +78,7 @@ def write_docx(doc: pf.Doc, ctx: WriterContext) -> bytes:
     if container_source != "custom":
         disable_autospace(d)
         tighten_compact(d)
+        unfix_code_size(d)
     apply_page(d, looks)
     used = remap_styles(d, config, ctx.report)
     apply_elements(d, looks, used, fallback_pt=parse_pt(config["elements"]["body"]["size"]))

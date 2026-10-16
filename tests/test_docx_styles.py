@@ -207,3 +207,10 @@ def test_custom_container_sets_only_the_written_line_heights(tmp_path):
     assert _spacing(h1) == (str(round(1.2 * _size_pt(d, h1) * 20)), "exact")  # the reference's own size
     assert _spacing(styles["Heading 2"])[1] != "exact"  # not written: the reference's own
     assert styles["Compact"].paragraph_format.space_after != 0  # tightening is built-in only
+
+
+def test_builtin_code_runs_take_the_code_size(tmp_path):
+    # pandoc's Verbatim Char fixes 11pt on every code run; the code block's 9.5pt must show
+    d, _ = render(tmp_path, "```\ncode\n```\n\n본문 `inline`\n")
+    rpr = styles_by_name(d)["Verbatim Char"].element.rPr
+    assert rpr is None or (rpr.find(qn("w:sz")) is None and rpr.find(qn("w:szCs")) is None)

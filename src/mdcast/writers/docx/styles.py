@@ -90,6 +90,20 @@ def _effective_size_pt(d, style) -> float | None:
     return None if sz is None else int(sz.get(qn("w:val"))) / 2
 
 
+def unfix_code_size(d) -> None:
+    """Let code runs take their paragraph's size (built-in only).
+
+    pandoc's Verbatim Char fixes 11pt on every code run, so a 9.5pt code block showed 11pt text
+    in an exact line computed for 9.5pt; the PDF sets the code at the template's size.
+    """
+    style = _by_name(d).get("Verbatim Char")
+    rpr = None if style is None else style.element.rPr
+    if rpr is not None:
+        for tag in ("w:sz", "w:szCs"):
+            for el in rpr.findall(qn(tag)):
+                rpr.remove(el)
+
+
 def tighten_compact(d) -> None:
     """Tight list items sit at the body's line height with no gaps, as in the PDF (built-in only)."""
     style = _by_name(d).get("Compact")
