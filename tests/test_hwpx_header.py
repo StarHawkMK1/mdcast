@@ -71,7 +71,7 @@ def test_para_shape_units():
     )
     para = h.item("paraProperties", pid)
     margin = {etree.QName(c).localname: c.get("value") for c in para.find("hh:margin", NS)}
-    assert margin["left"] == "2835" and margin["intent"] == str(-para_unit(3))
+    assert margin["left"] == "2834" and margin["intent"] == str(-para_unit(3))
     assert margin["prev"] == "800" and margin["next"] == "1200"
     assert para.find("hh:lineSpacing", NS).get("value") == "180"
     assert para.find("hh:lineSpacing", NS).get("type") == "PERCENT"
@@ -91,7 +91,7 @@ def test_margin_inside_switch_is_updated():
     etree.SubElement(switch, f"{hp}default").append(margin)
     pid = h.add_para("0", ParaSpec(left=5))
     values = [m.find("hc:left", NS).get("value") for m in h.item("paraProperties", pid).iter(f"{HH}margin")]
-    assert values == ["2835", "2835"]
+    assert values == ["2834", "2834"]
 
 
 def test_border_fills():

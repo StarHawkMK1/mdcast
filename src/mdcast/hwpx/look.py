@@ -13,6 +13,7 @@ class Look:
     """One element's look. ``None`` keeps the container's value."""
 
     font: str | None = None
+    font_hangul: str | None = None  # face for Hangul text when ``font`` has none (code)
     size: float | None = None  # pt
     bold: bool | None = None
     italic: bool | None = None

@@ -52,7 +52,9 @@ def test_background_pads_the_paragraph():
     header, shapes, _ = build(hwpx_settings())
     para = header.item("paraProperties", shapes["code"].para)
     border = para.find("hh:border", NS)
-    assert border.get("offsetLeft") == str(hwpunit(2.0)) and border.get("connect") == "0"
+    # Hangul's background box already holds the paragraph's margins and gaps: no offsets
+    assert [border.get(k) for k in ("offsetLeft", "offsetRight", "offsetTop", "offsetBottom")] == ["0"] * 4
+    assert border.get("connect") == "0"
     assert para.find("hh:margin/hc:left", NS).get("value") == str(para_unit(2.0))
     assert para.find("hh:margin/hc:right", NS).get("value") == str(para_unit(2.0))
     assert para.find("hh:margin/hc:prev", NS).get("value") == str(para_unit(2.0))
@@ -66,3 +68,14 @@ def test_none_keeps_the_container_value():
     para = header.item("paraProperties", shapes["body"].para)
     assert para.find("hh:lineSpacing", NS).get("value") == base.find("hh:lineSpacing", NS).get("value")
     assert para.find("hh:align", NS).get("horizontal") == base.find("hh:align", NS).get("horizontal")
+
+
+def test_code_keeps_a_korean_font_for_hangul_text():
+    # Consolas has no Hangul: without this Hangul substitutes a serif face (docx shows 맑은 고딕)
+    header, shapes, _ = build(hwpx_settings())
+    ref = header.item("charProperties", shapes["code"].char).find("hh:fontRef", NS)
+    faces = {}
+    for face in header.root.iter(f"{{{NS['hh']}}}fontface"):
+        lang = face.get("lang").lower()
+        faces[lang] = next(f.get("face") for f in face.findall("hh:font", NS) if f.get("id") == ref.get(lang))
+    assert faces["hangul"] == "맑은 고딕" and faces["latin"] == "Consolas"

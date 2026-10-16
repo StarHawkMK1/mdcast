@@ -247,9 +247,13 @@ def assemble(section: etree._Element, paragraphs: list[etree._Element], header: 
 
     first = paragraphs[0]
     first.set("id", first_id)
+    # every run of a line counts toward its height: the container's own character shape on the
+    # secPr run would set the first line's height (a code block first got a 10pt line)
+    first_char = next((run.get("charPrIDRef") for run in first.findall(hp("run"))), body.char)
+    sec_run.set("charPrIDRef", first_char)
     first.insert(0, sec_run)
     if controls:
-        run = etree.Element(hp("run"), charPrIDRef=body.char)
+        run = etree.Element(hp("run"), charPrIDRef=first_char)
         for ctrl in controls:
             run.append(ctrl)
         first.insert(1, run)

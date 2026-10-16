@@ -56,6 +56,14 @@ def test_first_paragraph_carries_the_section_settings_and_controls():
     assert len(section.findall("hp:p", NS)) == 2
 
 
+def test_section_runs_take_the_first_paragraphs_look():
+    # the container's own 10pt character shape on the secPr run set the first line's height
+    _, section, _ = build("```\n코드\n```\n")
+    first = section[0]
+    chars = {run.get("charPrIDRef") for run in first.findall("hp:run", NS)}
+    assert len(chars) == 1
+
+
 def test_page_size_margins_and_split():
     _, section, _ = build()
     page = section.find(".//hp:pagePr", NS)

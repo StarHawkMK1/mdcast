@@ -1,7 +1,8 @@
 """Dev-only: render mdcast outputs to PNG pages under .test-output/pages/ for manual review.
 
 PDF is rendered with pypdfium2. docx is first exported to PDF with Microsoft Word via COM
-(Windows only, optional) and then rendered the same way.
+(Windows only, optional) and then rendered the same way. hwpx is exported to PDF with Hancom
+Office via COM the same way.
 """
 
 from __future__ import annotations
@@ -57,6 +58,33 @@ def docx_to_pdf_with_word(docx_path: Path) -> Path:
     return out
 
 
+def hwpx_to_pdf_with_hangul(hwpx_path: Path) -> Path:
+    try:
+        import win32com.client as win32
+    except ImportError as exc:
+        raise ConverterMissing(
+            "hwpx 렌더링에는 Windows 와 pywin32, 한글이 필요합니다 "
+            "(hwpx rendering needs Windows, pywin32 and Hancom Office)"
+        ) from exc
+
+    if not hwpx_path.is_file():  # Hangul would wait on a dialog instead of failing
+        raise ConverterMissing(f"파일이 없습니다 (no such file): {hwpx_path}")
+    out = Path(tempfile.mkdtemp(prefix="mdcast-hangul-")) / (hwpx_path.stem + ".pdf")
+    try:
+        hwp = win32.gencache.EnsureDispatch("HWPFrame.HwpObject")
+    except Exception as exc:  # COM errors are pywintypes.com_error, not importable everywhere
+        raise ConverterMissing(f"한글을 실행할 수 없습니다 (cannot start Hancom Office): {exc}") from exc
+    try:
+        hwp.RegisterModule("FilePathCheckDLL", "FilePathCheckerModule")
+        if not hwp.Open(str(hwpx_path.resolve()), "HWPX", ""):
+            raise ConverterMissing(f"한글이 파일을 열지 못했습니다: {hwpx_path}")
+        hwp.SaveAs(str(out), "PDF", "")
+    finally:
+        hwp.Clear(1)
+        hwp.Quit()
+    return out
+
+
 def main(paths: list[str]) -> int:
     status = 0
     for raw in paths:
@@ -66,6 +94,8 @@ def main(paths: list[str]) -> int:
                 pages = render_pdf(path, path.stem + "-pdf")
             elif path.suffix.lower() == ".docx":
                 pages = render_pdf(docx_to_pdf_with_word(path), path.stem + "-docx")
+            elif path.suffix.lower() == ".hwpx":
+                pages = render_pdf(hwpx_to_pdf_with_hangul(path), path.stem + "-hwpx")
             else:
                 print("skip", path)
                 continue

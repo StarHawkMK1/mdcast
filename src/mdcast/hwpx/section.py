@@ -308,7 +308,8 @@ class SectionWriter:
 
     def _code(self, base: str) -> str:
         look = self.shapes["code"].look
-        return self.header.add_char(base, CharSpec(font=look.font, size=look.size))
+        spec = CharSpec(font=look.font, font_hangul=look.font_hangul, size=look.size)
+        return self.header.add_char(base, spec)
 
     def inlines(self, paragraph: Paragraph, items, char: str) -> None:
         for item in items:

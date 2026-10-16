@@ -147,8 +147,8 @@ def builtin_hwpx() -> bytes:
 
 def hwpx_integrity(data: bytes) -> dict:
     """Parse a hwpx and assert what Hangul relies on: package order, counts, unique ids, references."""
-    hh = lambda tag: f"{{{HWPX_NS['hh']}}}{tag}"  # noqa: E731
-    hp = lambda tag: f"{{{HWPX_NS['hp']}}}{tag}"  # noqa: E731
+    hh = lambda tag: f"{{{HWPX_NS['hh']}}}{tag}"
+    hp = lambda tag: f"{{{HWPX_NS['hp']}}}{tag}"
     archive = zipfile.ZipFile(io.BytesIO(data))
     first = archive.infolist()[0]
     assert first.filename == "mimetype" and first.compress_type == zipfile.ZIP_STORED
@@ -213,7 +213,7 @@ def hwpx_settings(**changes):
     looks = {
         "body": body,
         "quote": _replace(body, size=10.5, color="#555555", align="left", space_after=0, indent_left=5),
-        "code": Look(font="Consolas", size=9.5, bold=False, italic=False, color="#000000", align="left",
+        "code": Look(font="Consolas", font_hangul="맑은 고딕", size=9.5, bold=False, italic=False, color="#000000", align="left",
                      line_height=1.3, space_before=0, space_after=0, indent_left=0, background="#F6F8FA"),
         "caption": _replace(body, size=9.5, bold=True, align="center", line_height=1.3, space_after=0),
         "footnote": _replace(body, size=9, align="left", line_height=1.3, space_after=0),
@@ -224,10 +224,10 @@ def hwpx_settings(**changes):
     styles = {f"heading{level}": f"개요 {level}" for level in range(1, 7)}
     styles.update(body="바탕글", quote="바탕글", code="바탕글", caption="캡션", footnote="각주")
     markers = "□○-·"
-    values = dict(
-        looks=looks, styles=styles, body_size=11.0, body_line_height=1.8,
-        list_marker=lambda ordered, level, n: f"{n}." if ordered else markers[min(level, 4) - 1],
-    )
+    values = {
+        "looks": looks, "styles": styles, "body_size": 11.0, "body_line_height": 1.8,
+        "list_marker": lambda ordered, level, n: f"{n}." if ordered else markers[min(level, 4) - 1],
+    }
     values.update(changes)
     return Settings(**values)
 
@@ -254,3 +254,40 @@ def hwpx_texts(paragraphs) -> list[str]:
     t = f"{{{HWPX_NS['hp']}}}t"
     run = f"{{{HWPX_NS['hp']}}}run"
     return ["".join("".join(x.itertext()) for r in p.findall(run) for x in r.findall(t)) for p in paragraphs]
+
+
+def _pdf_chars(data: bytes, page: int = 0):
+    import ctypes
+
+    import pypdfium2 as pdfium
+    import pypdfium2.raw as pdfium_c
+
+    pdf_page = pdfium.PdfDocument(data)[page]
+    textpage = pdf_page.get_textpage()
+    height = pdf_page.get_height()
+    x, y = ctypes.c_double(), ctypes.c_double()
+    chars = []
+    for i in range(pdfium_c.FPDFText_CountChars(textpage.raw)):
+        pdfium_c.FPDFText_GetCharOrigin(textpage.raw, i, ctypes.byref(x), ctypes.byref(y))
+        ch = chr(pdfium_c.FPDFText_GetUnicode(textpage.raw, i) or 0xFFFD)
+        chars.append((ch, x.value * 25.4 / 72, (height - y.value) * 25.4 / 72))
+    return chars
+
+
+def char_origin(data: bytes, needle: str, page: int = 0) -> tuple[float, float]:
+    """Baseline origin (x, y from the top-left, mm) of the first character of ``needle``."""
+    chars = _pdf_chars(data, page)
+    text = "".join(ch for ch, _, _ in chars)
+    _, x, y = chars[text.index(needle)]
+    return x, y
+
+
+def line_starts(data: bytes, needle: str, page: int = 0) -> list[tuple[float, float]]:
+    """(x, y) mm of the first visible character of each line from ``needle`` on."""
+    chars = _pdf_chars(data, page)
+    text = "".join(ch for ch, _, _ in chars)
+    starts: list[tuple[float, float]] = []
+    for ch, x, y in chars[text.index(needle):]:
+        if ch.strip() and (not starts or abs(y - starts[-1][1]) > 1.0):
+            starts.append((x, y))
+    return starts

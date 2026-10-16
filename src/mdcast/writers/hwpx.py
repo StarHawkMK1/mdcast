@@ -34,13 +34,14 @@ def _color(value: Any) -> str | None:
     return None if color is None else f"#{color}"
 
 
-def _look(values: dict[str, Any], family: Any, neutral: bool) -> hwpx.Look:
+def _look(values: dict[str, Any], family: Any, neutral: bool, family_hangul: Any = None) -> hwpx.Look:
     def get(key: str, convert):
         value = values.get(key)
         return None if value is None else convert(value)
 
     look = {
         "font": str(family) if family else None,
+        "font_hangul": str(family_hangul) if family_hangul else None,
         "size": get("size", parse_pt),
         "bold": get("bold", bool),
         "italic": get("italic", bool),
@@ -94,8 +95,15 @@ def _settings(ctx: WriterContext, custom: bool) -> hwpx.Settings:
     values = ctx.template.explicit if custom else config
     elements = values.get("elements") or {}
     fonts = values.get("fonts") or {}
+    body_family = (fonts.get("body") or {}).get("family")
     looks = {
-        element: _look(elements.get(element) or {}, (fonts.get(_role(element)) or {}).get("family"), not custom)
+        element: _look(
+            elements.get(element) or {},
+            (fonts.get(_role(element)) or {}).get("family"),
+            not custom,
+            # Hangul text in code: the body face, as Word shows it (a Latin code face has no Hangul)
+            body_family if element == "code" else None,
+        )
         for element in hwpx.ELEMENTS
     }
     styles = {

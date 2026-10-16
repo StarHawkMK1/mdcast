@@ -42,6 +42,7 @@ class CharSpec:
     """Changes to a base character shape; ``None`` keeps the base value."""
 
     font: str | None = None
+    font_hangul: str | None = None  # Hangul-script group only; defaults to ``font``
     size: float | None = None  # pt
     color: str | None = None  # "#RRGGBB"
     bold: bool | None = None
@@ -168,6 +169,10 @@ class Header:
                 for lang, font_id in self.font_refs(spec.font).items():
                     if lang in LANGS:
                         ref.set(lang, font_id)
+        if spec.font_hangul is not None:
+            ref = element.find(hh("fontRef"))
+            if ref is not None:
+                ref.set("hangul", self.font_refs(spec.font_hangul)["hangul"])
         _flag(element, "bold", spec.bold)
         _flag(element, "italic", spec.italic)
         color = element.get("textColor", "#000000")

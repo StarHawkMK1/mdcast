@@ -19,20 +19,21 @@ class Shape:
 
 
 def char_spec(look: Look) -> CharSpec:
-    return CharSpec(font=look.font, size=look.size, color=look.color, bold=look.bold, italic=look.italic)
+    return CharSpec(font=look.font, font_hangul=look.font_hangul, size=look.size, color=look.color,
+                    bold=look.bold, italic=look.italic)
 
 
 def para_spec(header: Header, look: Look) -> ParaSpec:
     left, right, prev, after = look.indent_left, None, look.space_before, look.space_after
     fill = offsets = connect = None
     if look.background:
-        # Hangul widens a background by the border offsets: keep it on the text column and push
-        # the neighbours away by the same amount, as the PDF block's inset does
+        # the PDF block's inset: text 2mm inside the background, neighbours pushed 2mm away
         pad_pt = PADDING * 72 / 25.4
         fill = header.add_border_fill(fill=look.background)
         left, right = (look.indent_left or 0.0) + PADDING, PADDING
         prev, after = (look.space_before or 0.0) + pad_pt, (look.space_after or 0.0) + pad_pt
-        offsets, connect = (PADDING,) * 4, False
+        # Hangul's background box already holds the paragraph's margins and gaps (visual check)
+        offsets, connect = (0.0, 0.0, 0.0, 0.0), False
     return ParaSpec(
         align=look.align, line_height=look.line_height, prev=prev, next=after, left=left, right=right,
         keep_with_next=look.keep_with_next, border_fill=fill, offsets=offsets, connect=connect,

@@ -2,7 +2,8 @@
 
 HWPUNIT is 1/7200 inch (1pt = 100). Hangul reads paragraph margins (left, right, intent, prev,
 next) and tab positions at twice that unit; page sizes, page margins, border offsets and
-header/footer list sizes are plain HWPUNIT.
+header/footer list sizes are plain HWPUNIT. The doubled values must stay even: Hangul reads an
+odd one as another unit (a footer gap of 3321 put the footer below the page, appendix A-17).
 """
 
 from __future__ import annotations
@@ -17,8 +18,8 @@ def hwpunit_pt(pt: float) -> int:
 
 
 def para_unit(mm: float) -> int:
-    return round(mm * 14400 / 25.4)
+    return 2 * hwpunit(mm)
 
 
 def para_unit_pt(pt: float) -> int:
-    return round(pt * 200)
+    return 2 * hwpunit_pt(pt)

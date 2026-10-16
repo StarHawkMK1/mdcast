@@ -98,3 +98,14 @@ def test_pipeline_writes_hwpx(tmp_path):
     assert output.name == "doc.hwpx" and output.data[:2] == b"PK"
     hwpx_integrity(output.data)
     assert not [e for e in result.report.events if e.level is Level.ERROR]
+
+
+def test_code_hangul_text_uses_the_body_font(tmp_path):
+    parts, _ = render(tmp_path, "앞\n\n```\n코드\n```\n")
+    head = parts["Contents/header.xml"]
+    code = body_para(parts, "코드")
+    ref = head.find(f".//hh:charPr[@id='{text_char(code)}']/hh:fontRef", NS)
+    hangul = head.find(".//hh:fontface[@lang='HANGUL']", NS)
+    latin = head.find(".//hh:fontface[@lang='LATIN']", NS)
+    assert hangul.find(f"hh:font[@id='{ref.get('hangul')}']", NS).get("face") == "맑은 고딕"
+    assert latin.find(f"hh:font[@id='{ref.get('latin')}']", NS).get("face") == "Consolas"

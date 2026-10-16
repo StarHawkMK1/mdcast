@@ -19,8 +19,14 @@ OPF_META = f"{{{HWPX_NS['opf']}}}meta"
 def test_units_follow_hangul_measurements():
     assert hwpunit(15.0) == 4252  # page margins: plain HWPUNIT (appendix A-9)
     assert hwpunit_pt(10) == 1000
-    assert para_unit(5.0) == 2835  # paragraph margins and tab positions: twice (A-4, A-12)
+    assert para_unit(5.0) == 2834  # paragraph margins and tab positions: twice (A-4, A-12)
     assert para_unit_pt(10) == 2000
+
+
+def test_doubled_units_are_even():
+    # Hangul reads an odd value as another unit: a 3321 footer gap pushed it off the page
+    assert all(para_unit(n / 7) % 2 == 0 for n in range(200))
+    assert all(para_unit_pt(n / 7) % 2 == 0 for n in range(200))
 
 
 def test_builtin_container_is_sound_and_anonymous():
