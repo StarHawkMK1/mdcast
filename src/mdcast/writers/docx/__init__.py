@@ -11,6 +11,7 @@ from mdcast.report import Codes
 from mdcast.units import parse_pt
 from mdcast.writers.context import RenderError, WriterContext
 from mdcast.writers.docx.headers import apply_headers
+from mdcast.writers.docx.inline import loosen_inline_objects
 from mdcast.writers.docx.meta import apply_metadata
 from mdcast.writers.docx.numbering import apply_list_numbering
 from mdcast.writers.docx.styles import (
@@ -83,6 +84,7 @@ def write_docx(doc: pf.Doc, ctx: WriterContext) -> bytes:
     apply_list_numbering(d, config)
     explicit_tables = ctx.template.explicit if container_source == "custom" else None
     apply_tables(d, config, explicit_tables, ctx.state.get("tables", []), ctx.report)
+    loosen_inline_objects(d)  # after the cells' line heights are set
     apply_metadata(d, ctx.generator, ctx.fields, ctx.report)
     buffer = io.BytesIO()
     d.save(buffer)
