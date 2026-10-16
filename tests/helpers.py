@@ -99,3 +99,29 @@ def make_reference_docx(
             paragraph.add_run(text)
     document.save(str(path))
     return path
+
+
+def line_pitch(data: bytes, needle: str) -> float:
+    """Distance (pt) between the baselines of the first two text lines from ``needle`` on page 1.
+
+    Baselines, not character boxes: a box's top follows the glyph's outline, so lines starting
+    with different syllables would seem up to ~1pt apart.
+    """
+    import ctypes
+
+    import pypdfium2 as pdfium
+    import pypdfium2.raw as pdfium_c
+
+    textpage = pdfium.PdfDocument(data)[0].get_textpage()
+    text = textpage.get_text_range()
+    x, y = ctypes.c_double(), ctypes.c_double()
+    baselines: list[float] = []
+    for i in range(text.index(needle), len(text)):
+        if text[i].isspace():
+            continue
+        pdfium_c.FPDFText_GetCharOrigin(textpage.raw, i, ctypes.byref(x), ctypes.byref(y))
+        if not baselines or abs(y.value - baselines[-1]) > 2:
+            baselines.append(y.value)
+        if len(baselines) == 2:
+            return round(baselines[0] - baselines[1], 2)
+    raise AssertionError(f"{needle!r} does not wrap")

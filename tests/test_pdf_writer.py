@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pypdfium2 as pdfium
 import pytest
-from helpers import build, write_template
+from helpers import build, line_pitch, write_template
 
 from mdcast.report import Codes
 from mdcast.types import Format
@@ -157,27 +157,31 @@ def test_label_of_an_inline_image_that_became_a_placeholder_survives(tmp_path):
     assert Codes.IMAGE_FETCH_FAILED in [e.code for e in ctx.report.events]
 
 
-def _line_pitch(page, needle: str) -> float:
-    """Distance between the first two text lines of the paragraph that starts with ``needle``."""
-    textpage = page.get_textpage()
-    text = textpage.get_text_range()
-    start = text.index(needle)
-    tops: list[float] = []
-    for i in range(start, len(text)):
-        if not "가" <= text[i] <= "힣":  # Hangul syllables share one top edge
-            continue
-        top = round(textpage.get_charbox(i)[3], 1)
-        if not tops or abs(top - tops[-1]) > 2:
-            tops.append(top)
-        if len(tops) == 2:
-            return tops[0] - tops[1]
-    raise AssertionError(f"{needle!r} does not wrap")
+LONG = "줄 간격을 보기 위해 충분히 긴 문장을 씁니다. " * 6
 
 
-def test_table_cells_are_single_spaced_while_body_is_wider(tmp_path):
-    long = "줄 간격을 보기 위해 충분히 긴 문장을 씁니다. " * 6
-    md = f"본문{long}\n\n| 칸 |\n|---|\n| 셀{long} |\n"
-    page = pdfium.PdfDocument(render(tmp_path, md)[0])[0]
-    body, cell = _line_pitch(page, "본문"), _line_pitch(page, "셀")
-    # cells are 10pt: at the body's 160% they would sit at body * 10/11; single is clearly below
-    assert cell < body * 10 / 11 * 0.95
+@pytest.mark.parametrize(
+    ("md", "needle", "pitch"),
+    [
+        (f"본문{LONG}\n", "본문", 11 * 1.6),
+        ("- 목록 하나\n- 목록 둘\n", "목록 하나", 11 * 1.6),
+        (f"# 제목{LONG}\n", "제목", 16 * 1.3),
+        (f"| 칸 |\n|---|\n| 셀{LONG} |\n", "셀", 10 * 1.3),
+        ("```\n코드 첫째 줄\n코드 둘째 줄\n```\n", "코드 첫째", 9.5 * 1.3),
+    ],
+)
+def test_line_pitch_is_size_times_line_height(tmp_path, md, needle, pitch):
+    assert line_pitch(render(tmp_path, md)[0], needle) == pytest.approx(pitch, abs=0.3)
+
+
+def test_table_variant_line_height(tmp_path):
+    tpl = write_template(tmp_path, "t", "name: t\ntables: {variants: {dense: {line_height: 100%}}}\n")
+    md = f"<!-- table: dense -->\n\n| 칸 |\n|---|\n| 셀{LONG} |\n"
+    assert line_pitch(render(tmp_path, md, str(tpl))[0], "셀") == pytest.approx(10.0, abs=0.3)
+
+
+@pytest.mark.parametrize("ratio", ["50%", "2000%"])
+def test_extreme_line_heights_still_compile(tmp_path, ratio):
+    tpl = write_template(tmp_path, "t", f"name: t\nelements: {{body: {{line_height: {ratio}}}}}\n")
+    data, _ = render(tmp_path, f"본문{LONG}\n", str(tpl))
+    assert data.startswith(b"%PDF")

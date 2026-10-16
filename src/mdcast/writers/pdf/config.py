@@ -29,11 +29,12 @@ def _color(value: Any) -> str | None:
     return None if color is None else f"#{color}"
 
 
-def _leading(line_height: Any) -> float:
-    """Approximate Word's "multiple" line spacing as Typst paragraph leading (em)."""
-    if line_height is None:
-        return 0.65
-    return max(0.2, round(parse_ratio(line_height) * 1.2 - 1.0, 3))
+DEFAULT_LINE_HEIGHT = 1.3  # spec 2026-10-16 §7: a PDF element with no line_height
+
+
+def _line_height(value: Any) -> float:
+    """``line_height`` as a ratio of the font size (1.6 = 160%); see spec 2026-10-16 §2."""
+    return DEFAULT_LINE_HEIGHT if value is None else round(parse_ratio(value), 4)
 
 
 def _element(look: dict[str, Any]) -> dict[str, Any]:
@@ -43,7 +44,7 @@ def _element(look: dict[str, Any]) -> dict[str, Any]:
         "italic": look.get("italic"),
         "color": _color(look.get("color")),
         "align": look.get("align"),
-        "leading": _leading(look.get("line_height")),
+        "line_height": _line_height(look.get("line_height")),
         "space_before": _pt(look.get("space_before")) or 0.0,
         "space_after": _pt(look.get("space_after")) or 0.0,
         "indent_left": _mm(look.get("indent_left")) or 0.0,
@@ -75,6 +76,7 @@ def _table(s: dict[str, Any]) -> dict[str, Any]:
     return {
         "font_size": _pt(s["font_size"]),
         "cell_padding": _mm(s["cell_padding"]),
+        "line_height": _line_height(s.get("line_height")),
         "border": {"width": _pt(s["border"]["width"]), "color": inner_color},
         "border_outer": {
             "width": _pt(s["border_outer"]["width"]),

@@ -3,6 +3,8 @@
 //   conf(cfg, doc)                      -> page/text/element rules for the whole document
 //   mdcast-table(cfg, name, head, body) -> per-table styling wrapper
 //   horizontalrule                      -> used by pandoc's typst writer for `---`
+// Line heights: cfg.elements.<el>.line_height and cfg.tables.<name>.line_height are ratios of the
+// font size (1.6 = 160%): every line box is that tall and paragraphs set no extra leading.
 
 #let horizontalrule = line(length: 100%, stroke: 0.5pt)
 
@@ -38,12 +40,18 @@
   d
 }
 
+// A line box exactly r em tall (half the extra above, half below), so the line pitch and a
+// paragraph's height are r × the font size, like Word's "exact" line spacing.
+#let _lines(r) = (
+  top-edge: (0.8 + (r - 1) / 2) * 1em,
+  bottom-edge: -(0.2 + (r - 1) / 2) * 1em,
+)
+
 #let mdcast-table(cfg, name, head, body) = {
   let t = cfg.tables.at(name, default: cfg.tables.at("_default"))
   let inner = t.border.width * 1pt + rgb(t.border.color)
   let outer = t.border_outer.width * 1pt + rgb(t.border_outer.color)
-  set text(size: t.font_size * 1pt)
-  set par(leading: 0.65em)  // single line spacing in cells, as in the docx tables
+  set text(size: t.font_size * 1pt, .._lines(t.line_height))
   set table.header(repeat: t.header.repeat)
   set table(
     inset: t.cell_padding * 1mm,
@@ -77,9 +85,9 @@
     header: _slots(cfg.header),
     footer: _slots(cfg.footer),
   )
-  set text(font: cfg.fonts.body, lang: "ko", .._text-args(el.body))
+  set text(font: cfg.fonts.body, lang: "ko", .._text-args(el.body), .._lines(el.body.line_height))
   set par(
-    leading: el.body.leading * 1em,
+    leading: 0em,
     spacing: el.body.space_after * 1pt,
     justify: el.body.align == "justify",
   )
@@ -99,25 +107,25 @@
     position: if cfg.tables.at("_default").caption.position == "below" { bottom } else { top })
   show figure.where(kind: image): set figure.caption(
     position: if cfg.figures.caption.position == "above" { top } else { bottom })
-  show figure.caption: set text(.._text-args(el.caption))
+  show figure.caption: set text(.._text-args(el.caption), .._lines(el.caption.line_height))
   show heading: set text(font: cfg.fonts.heading)
   show raw: set text(font: cfg.fonts.code)
   show raw.where(block: true): it => block(
     width: 100%,
     inset: 2mm,
     fill: _none-or(el.code.background, rgb),
-    text(.._text-args(el.code), it),
+    text(.._text-args(el.code), .._lines(el.code.line_height), it),
   )
   show quote.where(block: true): it => block(
     inset: (left: el.quote.indent_left * 1mm),
-    text(.._text-args(el.quote), it.body),
+    text(.._text-args(el.quote), .._lines(el.quote.line_height), it.body),
   )
-  show footnote.entry: set text(.._text-args(el.footnote))
+  show footnote.entry: set text(.._text-args(el.footnote), .._lines(el.footnote.line_height))
   let doc = doc
   for lv in range(1, 7) {
     let e = el.at("heading" + str(lv))
     doc = {
-      show heading.where(level: lv): set text(.._text-args(e))
+      show heading.where(level: lv): set text(.._text-args(e), .._lines(e.line_height))
       show heading.where(level: lv): set block(above: e.space_before * 1pt, below: e.space_after * 1pt)
       doc
     }

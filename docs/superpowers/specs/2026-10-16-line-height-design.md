@@ -52,7 +52,7 @@
 ## 6. PDF
 
 1. **줄 상자 모델:** 요소마다 `text(top-edge: (0.8 + h) em, bottom-edge: -(0.2 + h) em)` 와 `par(leading: 0em)` 을 쓴다. 여기서 h = (N/100 − 1) / 2 다. 줄 상자 높이가 정확히 N/100 em 이 되어, 줄 피치와 문단 높이가 정의와 같아진다. 2026-10-16 실험에서 11pt 기준 100%·130%·160% 모두 피치 11.0·14.4·17.6pt, 문단 높이 오차 0 으로 확인했다.
-2. **적용 위치(내장 pdf.typ):** 문서 전체에 body, 제목은 수준별 show 규칙, 그리고 code 블록·quote·figure.caption·footnote.entry·`mdcast-table` 안에서 각 요소의 값을 쓴다. 좁은 목록의 항목 사이는 `list.spacing`·`enum.spacing` 을 0 으로 한다.
+2. **적용 위치(내장 pdf.typ):** 문서 전체에 body, 제목은 수준별 show 규칙, 그리고 code 블록·quote·figure.caption·footnote.entry·`mdcast-table` 안에서 각 요소의 값을 쓴다. 좁은 목록의 항목 사이는 Typst 기본(`spacing: auto` 가 좁은 목록에 `par.leading` = 0 을 씀)으로 0 이 된다. 넓은 목록은 `par.spacing` 을 쓴다.
 3. **설정 JSON:** `elements.<요소>.leading` 을 없애고 `elements.<요소>.line_height`(비율, 예: 1.6)를 넣는다. 표 설정에 `line_height` 를 넣는다. `_leading()` 은 지운다.
 4. **사용자 pdf.typ 계약:** 사용자 pdf.typ 가 `leading` 을 읽고 있었다면 컴파일에 실패하고, 기존 규칙대로 내장 레이아웃으로 대체되며 `TEMPLATE_INVALID` 경고가 나간다(무거부 유지). README 의 pdf.typ 계약 설명을 새 키로 고친다.
 
