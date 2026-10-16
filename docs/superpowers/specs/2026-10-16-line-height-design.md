@@ -37,7 +37,7 @@
 | 요소 | line_height |
 |---|---|
 | heading1–6, code, caption, footnote | 130% |
-| body, quote | 160% (body 는 지금과 같음) |
+| body, quote | 180% (2026-10-16 사용자 결정: 160% 에서 조금 넓힘) |
 | tables.line_height | 130% |
 
 ## 5. docx

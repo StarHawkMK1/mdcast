@@ -42,7 +42,7 @@ def test_elements_are_normalised(tmp_path):
     cfg, _ = cfg_for(tmp_path)
     h1 = cfg["elements"]["heading1"]
     assert (h1["size"], h1["bold"], h1["color"]) == (16.0, True, "#1F3864")
-    assert cfg["elements"]["body"]["line_height"] == pytest.approx(1.6)
+    assert cfg["elements"]["body"]["line_height"] == pytest.approx(1.8)
     assert "leading" not in cfg["elements"]["body"]
     assert cfg["tables"]["_default"]["line_height"] == pytest.approx(1.3)
     assert cfg["elements"]["quote"]["indent_left"] == 5.0

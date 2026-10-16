@@ -31,7 +31,7 @@ def test_default_element_looks(tmp_path):
     body = d.styles["Body Text"]
     assert body.font.size.pt == 11
     assert body.paragraph_format.alignment == WD_ALIGN_PARAGRAPH.JUSTIFY
-    assert _spacing(body) == ("352", "exact")
+    assert _spacing(body) == ("396", "exact")
     rfonts = d.styles["Normal"].element.rPr.rFonts
     assert rfonts.get(qn("w:eastAsia")) == "맑은 고딕"
     assert rfonts.get(qn("w:ascii")) == "Malgun Gothic"
@@ -173,8 +173,8 @@ def _spacing(style) -> tuple[str | None, str | None]:
 def test_builtin_styles_use_exact_line_height(tmp_path):
     d, _ = render(tmp_path, "# 제목\n\n본문\n\nTable: 캡션\n\n| a |\n|---|\n| 1 |\n")
     styles = styles_by_name(d)
-    assert _spacing(styles["Body Text"]) == ("352", "exact")  # 11pt × 160% × 20
-    assert _spacing(styles["First Paragraph"]) == ("352", "exact")
+    assert _spacing(styles["Body Text"]) == ("396", "exact")  # 11pt × 180% × 20
+    assert _spacing(styles["First Paragraph"]) == ("396", "exact")
     assert _spacing(styles["Heading 1"]) == ("416", "exact")  # 16pt × 130%
     assert _spacing(styles["Table Caption"]) == ("247", "exact")  # 9.5pt × 130%
     assert _spacing(styles["Footnote Text"]) == ("234", "exact")  # 9pt × 130%

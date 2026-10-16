@@ -176,7 +176,7 @@ def test_sanitize_rejects_non_finite_bad_format_and_bad_margins():
     })
     r = new_report()
     clean = sanitize(config, default, r)
-    assert clean["elements"]["body"]["line_height"] == "160%"
+    assert clean["elements"]["body"]["line_height"] == "180%"
     assert clean["tables"]["caption"]["format"] == "<표 {n}> {text}"
     assert clean["fonts"]["body"]["family"] == "맑은 고딕"
     assert clean["page"]["margin"] == default["page"]["margin"]
@@ -200,7 +200,7 @@ def test_logo_mapping_validated():
 def test_builtin_line_heights_are_all_set():
     default = load_builtin_default()
     expected = {f"heading{i}": "130%" for i in range(1, 7)} | {
-        "body": "160%", "quote": "160%", "code": "130%", "caption": "130%", "footnote": "130%",
+        "body": "180%", "quote": "180%", "code": "130%", "caption": "130%", "footnote": "130%",
     }
     assert {k: v["line_height"] for k, v in default["elements"].items()} == expected
     assert default["tables"]["line_height"] == "130%"
