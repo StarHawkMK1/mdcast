@@ -51,8 +51,8 @@ class ResolvedTemplate:
 
     def builtin_container(self, fmt: str) -> Container:
         """The built-in container for ``fmt``; ``path=None`` means the engine's own default."""
-        if fmt == "pdf":
-            return Container(BUILTIN_DIR / DEFAULT_NAME / DEFAULT_FILES["pdf"], "builtin")
+        if fmt in ("pdf", "hwpx"):
+            return Container(BUILTIN_DIR / DEFAULT_NAME / DEFAULT_FILES[fmt], "builtin")
         return Container(None, "builtin")
 
     def info(self, formats: Iterable[str]) -> TemplateInfo:

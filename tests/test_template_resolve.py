@@ -210,7 +210,8 @@ def test_builtin_container_ignores_custom_files(tmp_path):
     write_template(project_dir(tmp_path), "rep", "name: rep\n", {"reference.docx": b"stub"})
     tpl, _ = resolve("rep", tmp_path)
     assert tpl.builtin_container("docx").path is None
-    assert tpl.builtin_container("hwpx") == tpl.builtin_container("docx")
+    hwpx = tpl.builtin_container("hwpx")
+    assert hwpx.source == "builtin" and hwpx.path.name == "reference.hwpx" and hwpx.path.is_file()
     pdf = tpl.builtin_container("pdf")
     assert pdf.source == "builtin" and pdf.path.name == "pdf.typ" and pdf.path.is_file()
 

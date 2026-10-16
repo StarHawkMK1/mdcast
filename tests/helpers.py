@@ -4,12 +4,14 @@ import io
 import struct
 import subprocess
 import textwrap
+import zipfile
 import zlib
 from pathlib import Path
 
 import docx
 import pypandoc
 from docx.enum.style import WD_STYLE_TYPE
+from lxml import etree
 
 from mdcast.fields import resolve_fields
 from mdcast.pipeline import build_generator, prepare_target
@@ -127,3 +129,74 @@ def line_pitch(data: bytes, needle: str) -> float:
         if len(baselines) == 2:
             return round(baselines[0] - baselines[1], 2)
     raise AssertionError(f"{needle!r} does not wrap")
+
+
+HWPX_NS = {
+    "hh": "http://www.hancom.co.kr/hwpml/2011/head",
+    "hp": "http://www.hancom.co.kr/hwpml/2011/paragraph",
+    "hs": "http://www.hancom.co.kr/hwpml/2011/section",
+    "hc": "http://www.hancom.co.kr/hwpml/2011/core",
+    "opf": "http://www.idpf.org/2007/opf/",
+}
+BUILTIN_HWPX = Path(__file__).resolve().parents[1] / "src/mdcast/builtin_templates/default/reference.hwpx"
+
+
+def builtin_hwpx() -> bytes:
+    return BUILTIN_HWPX.read_bytes()
+
+
+def hwpx_integrity(data: bytes) -> dict:
+    """Parse a hwpx and assert what Hangul relies on: package order, counts, unique ids, references."""
+    hh = lambda tag: f"{{{HWPX_NS['hh']}}}{tag}"  # noqa: E731
+    hp = lambda tag: f"{{{HWPX_NS['hp']}}}{tag}"  # noqa: E731
+    archive = zipfile.ZipFile(io.BytesIO(data))
+    first = archive.infolist()[0]
+    assert first.filename == "mimetype" and first.compress_type == zipfile.ZIP_STORED
+    assert archive.read("mimetype") == b"application/hwp+zip"
+    parts = {
+        name: etree.fromstring(archive.read(name))
+        for name in archive.namelist()
+        if name.endswith((".xml", ".hpf"))
+    }
+    head = parts["Contents/header.xml"]
+    for element in head.iter():
+        if element.get("itemCnt") is not None:
+            assert int(element.get("itemCnt")) == len(element), element.tag
+
+    def ids(tag: str) -> set:
+        values = [e.get("id") for e in head.iter(hh(tag))]
+        assert len(values) == len(set(values)), f"duplicate {tag} id"
+        return set(values)
+
+    fonts = {}
+    for face in head.iter(hh("fontface")):
+        items = face.findall(hh("font"))
+        assert int(face.get("fontCnt")) == len(items), face.get("lang")
+        font_ids = [f.get("id") for f in items]
+        assert len(font_ids) == len(set(font_ids))
+        fonts[face.get("lang").lower()] = set(font_ids)
+    chars, paras, fills, tabs, styles = (ids(t) for t in ("charPr", "paraPr", "borderFill", "tabPr", "style"))
+    for char in head.iter(hh("charPr")):
+        assert char.get("borderFillIDRef") in fills
+        ref = char.find(hh("fontRef"))
+        for lang, font_ids in fonts.items():
+            assert ref.get(lang) in font_ids, (char.get("id"), lang)
+    for para in head.iter(hh("paraPr")):
+        assert para.get("tabPrIDRef") in tabs
+        for border in para.iter(hh("border")):
+            assert border.get("borderFillIDRef") in fills
+    for style in head.iter(hh("style")):
+        assert style.get("paraPrIDRef") in paras and style.get("charPrIDRef") in chars
+        assert style.get("nextStyleIDRef") in styles
+    section = parts["Contents/section0.xml"]
+    for p in section.iter(hp("p")):
+        assert p.get("paraPrIDRef") in paras and p.get("styleIDRef") in styles
+    for run in section.iter(hp("run")):
+        assert run.get("charPrIDRef") in chars
+    begins = {b.get("id") for b in section.iter(hp("fieldBegin"))}
+    for end in section.iter(hp("fieldEnd")):
+        assert end.get("beginIDRef") in begins
+    sec_prs = list(section.iter(hp("secPr")))
+    assert len(sec_prs) == 1
+    assert sec_prs[0].getparent().getparent() is section[0]
+    return parts
