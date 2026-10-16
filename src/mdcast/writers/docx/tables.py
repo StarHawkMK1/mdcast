@@ -110,18 +110,19 @@ def _tr_pr(tr):
     return trpr
 
 
-def _cell_line_height(tbl, twips: int) -> None:
-    """Exact line height and no paragraph gaps in the cells, as in the PDF's tables.
+def _cell_line_height(tbl, twips: int, *, no_gaps: bool) -> None:
+    """Exact line height in the cells and, with ``no_gaps``, no paragraph gaps, as in the PDF's tables.
 
     Direct formatting: the cells' paragraph style (Compact, based on the body) would beat a
-    table style's spacing.
+    table style's spacing. A custom container gets only the written line height (spec 3.3).
     """
+    gaps = {"before": 0, "after": 0} if no_gaps else {}
     for p in tbl.iter(qn("w:p")):
         ppr = p.find(qn("w:pPr"))
         if ppr is None:
             ppr = OxmlElement("w:pPr")
             p.insert(0, ppr)
-        upsert(ppr, "w:spacing", PPR_ORDER, before=0, after=0, line=twips, lineRule="exact")
+        upsert(ppr, "w:spacing", PPR_ORDER, **gaps, line=twips, lineRule="exact")
 
 
 def apply_tables(
@@ -209,7 +210,8 @@ def apply_tables(
         if s.get("width") == "full":
             upsert(tblpr, "w:tblW", TBLPR_ORDER, w=5000, type="pct")
         if look.get("line_height") is not None:
-            _cell_line_height(tbl, line_twips(parse_ratio(look["line_height"]), parse_pt(s["font_size"])))
+            twips = line_twips(parse_ratio(look["line_height"]), parse_pt(s["font_size"]))
+            _cell_line_height(tbl, twips, no_gaps=explicit is None)
         for tr in tbl.findall(qn("w:tr"))[: record["head_rows"]]:
             trpr = _tr_pr(tr)
             remove_all(trpr, "w:tblHeader")

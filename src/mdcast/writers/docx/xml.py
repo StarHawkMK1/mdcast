@@ -74,9 +74,15 @@ def remove_all(parent, tag: str) -> None:
         parent.remove(child)
 
 
+MAX_LINE_TWIPS = 31680  # Word: 1584pt
+
+
 def line_twips(ratio: float, size_pt: float) -> int:
-    """Exact line height in twips for ``line_height`` (a ratio of the font size, spec 2026-10-16 §2)."""
-    return round(ratio * size_pt * 20)
+    """Exact line height in twips for ``line_height`` (a ratio of the font size, spec 2026-10-16 §2).
+
+    Kept within what Word accepts: at least 1 twip, at most 1584pt.
+    """
+    return min(max(round(ratio * size_pt * 20), 1), MAX_LINE_TWIPS)
 
 
 def mm_to_twips(mm: float) -> int:

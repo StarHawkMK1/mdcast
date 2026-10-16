@@ -180,6 +180,15 @@ def test_table_variant_line_height(tmp_path):
     assert line_pitch(render(tmp_path, md, str(tpl))[0], "셀") == pytest.approx(10.0, abs=0.3)
 
 
+def test_paragraphs_in_one_cell_have_no_gap(tmp_path):
+    # as in the docx cells (before/after 0): the next paragraph sits one line pitch below
+    rule, head = "+" + "-" * 40 + "+\n", "+" + "=" * 40 + "+\n"
+    # grid tables align by display width; a Hangul syllable takes two columns
+    row = lambda text: "| " + text + " " * (38 - 2 * len(text)) + " |\n"
+    md = rule + row("칸") + head + row("첫째") + row("") + row("둘째") + rule
+    assert line_pitch(render(tmp_path, md)[0], "첫째") == pytest.approx(10 * 1.3, abs=0.3)
+
+
 @pytest.mark.parametrize("ratio", ["50%", "2000%"])
 def test_extreme_line_heights_still_compile(tmp_path, ratio):
     tpl = write_template(tmp_path, "t", f"name: t\nelements: {{body: {{line_height: {ratio}}}}}\n")

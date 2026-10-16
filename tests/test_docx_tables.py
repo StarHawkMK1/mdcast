@@ -292,4 +292,5 @@ def test_custom_container_cells_change_only_when_written(tmp_path):
     assert cell_line_spacings(render(tmp_path, TABLE, str(tpl))) == [(None, None, None, None)] * 4
     tpl2 = write_template(tmp_path, "t2", "name: t2\ntables: {line_height: 150%}\n")
     make_reference_docx(tpl2 / "reference.docx")
-    assert cell_line_spacings(render(tmp_path, TABLE, str(tpl2))) == [("300", "exact", "0", "0")] * 4
+    # only the written line height: the reference keeps its own space before/after
+    assert cell_line_spacings(render(tmp_path, TABLE, str(tpl2))) == [("300", "exact", None, None)] * 4

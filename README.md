@@ -33,7 +33,7 @@ Markdown ↔ docx · hwpx · pdf, 템플릿 기반 변환기. (M1: MD → docx, 
 
 - `elements.<요소>.line_height`: 제목·본문·인용·코드·캡션·각주. 내장 템플릿은 모두 값을 가집니다(본문·인용 180%, 나머지 130%).
 - `tables.line_height`: 표 셀 안 줄 높이(기본 130%, 글자 크기는 `tables.font_size`). 표 종류(`tables.variants.<이름>`)에서 덮어쓸 수 있습니다.
-- docx 는 Word 의 "고정" 줄 간격으로 씁니다. 이미지나 수식이 든 문단만 "최소" 로 두어 잘리지 않게 합니다.
+- docx 는 Word 의 "고정" 줄 간격으로 씁니다. 줄보다 큰 이미지나 쌓인 수식(분수 등)이 든 문단만 "최소" 로 두어 잘리지 않게 합니다. 사용자 reference.docx 의 "고정" 줄 간격도 그런 문단에서는 "최소" 로 바뀝니다.
 - 사용자 reference.docx 를 쓰면 yaml 에 적은 줄 높이만 적용하고, 적지 않은 요소는 그 문서의 설정을 따릅니다. 이때 PDF 는 상속받은 값(내장 기본값)을 쓰므로, 두 형식을 맞추려면 값을 적어 주세요.
 - 사용자 `pdf.typ` 는 `cfg.elements.<요소>.line_height`, `cfg.tables.<이름>.line_height` (비율, 1.6 = 160%)를 읽습니다. 예전의 `leading` 키는 없어졌습니다.
 

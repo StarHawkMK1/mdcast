@@ -214,3 +214,11 @@ def test_builtin_code_runs_take_the_code_size(tmp_path):
     d, _ = render(tmp_path, "```\ncode\n```\n\n본문 `inline`\n")
     rpr = styles_by_name(d)["Verbatim Char"].element.rPr
     assert rpr is None or (rpr.find(qn("w:sz")) is None and rpr.find(qn("w:szCs")) is None)
+
+
+def test_line_height_stays_within_words_range():
+    from mdcast.writers.docx.xml import line_twips
+
+    assert line_twips(20, 1000) == 31680  # Word's maximum, 1584pt
+    assert line_twips(0.001, 1) == 1
+    assert line_twips(1.8, 11) == 396
