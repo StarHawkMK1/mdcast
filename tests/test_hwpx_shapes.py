@@ -5,7 +5,7 @@ from mdcast.hwpx.container import Package
 from mdcast.hwpx.header import Header
 from mdcast.hwpx.look import ELEMENTS, Look, Notices, Settings
 from mdcast.hwpx.shapes import build_shapes
-from mdcast.hwpx.units import hwpunit, para_unit
+from mdcast.hwpx.units import para_unit
 
 
 def build(settings):
