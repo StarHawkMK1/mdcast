@@ -230,3 +230,27 @@ def hwpx_settings(**changes):
     )
     values.update(changes)
     return Settings(**values)
+
+
+def hwpx_render(md: str, settings=None, doc=None):
+    """Header, shapes, paragraphs and notices of ``md`` (or ``doc``) on the built-in container."""
+    from mdcast.ast import md_to_doc
+    from mdcast.hwpx.container import Package
+    from mdcast.hwpx.header import Header
+    from mdcast.hwpx.look import Notices
+    from mdcast.hwpx.section import SectionWriter
+    from mdcast.hwpx.shapes import build_shapes
+
+    settings = settings or hwpx_settings()
+    header = Header(Package.read(builtin_hwpx()).xml("Contents/header.xml"))
+    notices = Notices()
+    shapes = build_shapes(header, settings, notices)
+    paragraphs = SectionWriter(header, shapes, settings, notices).build(doc or md_to_doc(md))
+    return header, shapes, paragraphs, notices
+
+
+def hwpx_texts(paragraphs) -> list[str]:
+    """Each paragraph's own text (runs directly under it; header/footer lists excluded)."""
+    t = f"{{{HWPX_NS['hp']}}}t"
+    run = f"{{{HWPX_NS['hp']}}}run"
+    return ["".join("".join(x.itertext()) for r in p.findall(run) for x in r.findall(t)) for p in paragraphs]
