@@ -29,7 +29,7 @@ elements:
   body:     { size: 11pt, bold: null, italic: null, color: null, align: justify, line_height: 160%, space_before: 0pt, space_after: 4pt, indent_left: null, background: null, keep_with_next: null }
   quote:    { size: 10.5pt, bold: null, italic: null, color: "#555555", align: null, line_height: null, space_before: null, space_after: null, indent_left: 5mm, background: null, keep_with_next: null }
   code:     { size: 9.5pt, bold: null, italic: null, color: null, align: null, line_height: null, space_before: null, space_after: null, indent_left: null, background: "#F6F8FA", keep_with_next: null }
-  caption:  { size: 9.5pt, bold: true, italic: null, color: null, align: center, line_height: null, space_before: null, space_after: null, indent_left: null, background: null, keep_with_next: null }
+  caption:  { size: 9.5pt, bold: true, italic: false, color: null, align: center, line_height: null, space_before: null, space_after: null, indent_left: null, background: null, keep_with_next: null }
   footnote: { size: 9pt, bold: null, italic: null, color: null, align: null, line_height: null, space_before: null, space_after: null, indent_left: null, background: null, keep_with_next: null }
 
 styles:
