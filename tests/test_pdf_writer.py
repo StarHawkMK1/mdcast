@@ -49,6 +49,14 @@ def test_table_variant_renders(tmp_path):
     assert '#mdcast-table(cfg, "plain", 1)[' in (ctx.work_dir / "main.typ").read_text(encoding="utf-8")
 
 
+def test_typst_source_has_plain_newlines(tmp_path):
+    # pandoc wraps long paragraphs; on Windows a "\r\r\n" line end reads as a blank line to
+    # Typst, which split every wrapped source line into its own paragraph
+    md = "줄 간격을 보기 위해 충분히 긴 문장을 씁니다. " * 8 + "\n\n- 하나\n- 둘\n"
+    _, ctx = render(tmp_path, md)
+    assert b"\r" not in (ctx.work_dir / "main.typ").read_bytes()
+
+
 def test_unknown_primary_font_reports_fallback(tmp_path):
     tpl = write_template(tmp_path, "t", "name: t\nfonts: {body: {family: 없는글꼴xyz, fallback: []}}\n")
     data, ctx = render(tmp_path, "본문\n", str(tpl))

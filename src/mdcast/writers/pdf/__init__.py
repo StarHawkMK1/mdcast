@@ -86,7 +86,9 @@ def write_pdf(doc: pf.Doc, ctx: WriterContext) -> bytes:
     cfg: dict[str, Any] = build_typst_config(ctx.template, ctx.fields, ctx.report)
     cfg_json = json.dumps(cfg, ensure_ascii=False)
     main = ctx.work_dir / "main.typ"
-    main.write_text(MAIN_PREAMBLE + body, encoding="utf-8")
+    # pandoc returns CRLF on Windows and text-mode writing would add another "\r"; Typst reads
+    # "\r\r\n" as a blank line, splitting every wrapped source line into its own paragraph
+    main.write_bytes((MAIN_PREAMBLE + body.replace("\r\n", "\n")).encode("utf-8"))
     layout = ctx.template.container_for("pdf")
     builtin = ctx.template.builtin_container("pdf")
     candidates = []
