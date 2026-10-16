@@ -10,7 +10,7 @@ from docx.oxml.ns import qn
 from mdcast.filters.tables import table_settings
 from mdcast.report import Codes, Report
 from mdcast.templates.schema import deep_merge
-from mdcast.units import normalize_color, parse_length_mm, parse_pt
+from mdcast.units import normalize_color, parse_length_mm, parse_pt, parse_ratio
 from mdcast.writers.docx.xml import (
     BORDER_ORDER,
     MAR_ORDER,
@@ -20,6 +20,7 @@ from mdcast.writers.docx.xml import (
     TBLPR_ORDER,
     TCPR_ORDER,
     half_points,
+    line_twips,
     mm_to_twips,
     pt_to_eighths,
     remove_all,
@@ -109,18 +110,18 @@ def _tr_pr(tr):
     return trpr
 
 
-def _single_spaced(tbl) -> None:
-    """Single line spacing in the cells, like the PDF's tables.
+def _cell_line_height(tbl, twips: int) -> None:
+    """Exact line height and no paragraph gaps in the cells, as in the PDF's tables.
 
-    Direct formatting: the cells' paragraph style (Compact, based on the body's 160%) would
-    beat a table style's spacing.
+    Direct formatting: the cells' paragraph style (Compact, based on the body) would beat a
+    table style's spacing.
     """
     for p in tbl.iter(qn("w:p")):
         ppr = p.find(qn("w:pPr"))
         if ppr is None:
             ppr = OxmlElement("w:pPr")
             p.insert(0, ppr)
-        upsert(ppr, "w:spacing", PPR_ORDER, line=240, lineRule="auto")
+        upsert(ppr, "w:spacing", PPR_ORDER, before=0, after=0, line=twips, lineRule="exact")
 
 
 def apply_tables(
@@ -207,8 +208,8 @@ def apply_tables(
             look_el.set(qn(f"w:{key}"), value)
         if s.get("width") == "full":
             upsert(tblpr, "w:tblW", TBLPR_ORDER, w=5000, type="pct")
-        if explicit is None:
-            _single_spaced(tbl)
+        if look.get("line_height") is not None:
+            _cell_line_height(tbl, line_twips(parse_ratio(look["line_height"]), parse_pt(s["font_size"])))
         for tr in tbl.findall(qn("w:tr"))[: record["head_rows"]]:
             trpr = _tr_pr(tr)
             remove_all(trpr, "w:tblHeader")

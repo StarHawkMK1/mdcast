@@ -260,7 +260,7 @@ def test_failed_figure_with_id_adds_no_table_and_keeps_bookmark(tmp_path):
     assert Codes.STYLE_UNMAPPED not in codes and Codes.RENDER_WARNING not in codes
 
 
-def cell_line_spacings(data: bytes) -> list[tuple[str | None, str | None]]:
+def cell_line_spacings(data: bytes) -> list[tuple[str | None, ...]]:
     body = part(data, "word/document.xml").find(qn("w:body"))
     out = []
     for p in body.iter(qn("w:p")):
@@ -268,18 +268,28 @@ def cell_line_spacings(data: bytes) -> list[tuple[str | None, str | None]]:
             continue
         ppr = p.find(qn("w:pPr"))
         spacing = None if ppr is None else ppr.find(qn("w:spacing"))
-        out.append((None, None) if spacing is None else (spacing.get(qn("w:line")), spacing.get(qn("w:lineRule"))))
+        keys = ("line", "lineRule", "before", "after")
+        out.append(tuple(None if spacing is None else spacing.get(qn(f"w:{k}")) for k in keys))
     return out
 
 
-def test_builtin_cells_use_single_line_spacing(tmp_path):
-    # the body's 160% made every row twice as tall as the PDF's
-    data = render(tmp_path, "| a | b |\n|---|---|\n| 1 | 2 |\n")
-    assert cell_line_spacings(data) == [("240", "auto")] * 4
+TABLE = "| a | b |\n|---|---|\n| 1 | 2 |\n"
 
 
-def test_custom_container_cells_keep_their_spacing(tmp_path):
+def test_builtin_cells_use_exact_table_line_height(tmp_path):
+    assert cell_line_spacings(render(tmp_path, TABLE)) == [("260", "exact", "0", "0")] * 4  # 10pt × 130%
+
+
+def test_variant_line_height_overrides_the_cells(tmp_path):
+    tpl = write_template(tmp_path, "t", "name: t\ntables: {variants: {dense: {line_height: 100%}}}\n")
+    data = render(tmp_path, "<!-- table: dense -->\n\n" + TABLE, str(tpl))
+    assert cell_line_spacings(data) == [("200", "exact", "0", "0")] * 4
+
+
+def test_custom_container_cells_change_only_when_written(tmp_path):
     tpl = write_template(tmp_path, "t", "name: t\n")
     make_reference_docx(tpl / "reference.docx")
-    data = render(tmp_path, "| a | b |\n|---|---|\n| 1 | 2 |\n", str(tpl))
-    assert cell_line_spacings(data) == [(None, None)] * 4
+    assert cell_line_spacings(render(tmp_path, TABLE, str(tpl))) == [(None, None, None, None)] * 4
+    tpl2 = write_template(tmp_path, "t2", "name: t2\ntables: {line_height: 150%}\n")
+    make_reference_docx(tpl2 / "reference.docx")
+    assert cell_line_spacings(render(tmp_path, TABLE, str(tpl2))) == [("300", "exact", "0", "0")] * 4
