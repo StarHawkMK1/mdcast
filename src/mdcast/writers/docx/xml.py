@@ -74,6 +74,11 @@ def remove_all(parent, tag: str) -> None:
         parent.remove(child)
 
 
+def line_twips(ratio: float, size_pt: float) -> int:
+    """Exact line height in twips for ``line_height`` (a ratio of the font size, spec 2026-10-16 §2)."""
+    return round(ratio * size_pt * 20)
+
+
 def mm_to_twips(mm: float) -> int:
     return round(mm / 25.4 * 1440)
 

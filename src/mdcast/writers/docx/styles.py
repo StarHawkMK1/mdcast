@@ -12,7 +12,7 @@ from docx.shared import Mm, Pt, RGBColor
 from mdcast.fonts import latin_name
 from mdcast.report import Codes, Report
 from mdcast.units import normalize_color, page_size_mm, parse_length_mm, parse_pt, parse_ratio
-from mdcast.writers.docx.xml import PPR_ORDER, upsert
+from mdcast.writers.docx.xml import PPR_ORDER, line_twips, upsert
 
 PANDOC_STYLES: dict[str, list[str]] = {
     **{f"heading{i}": [f"Heading {i}"] for i in range(1, 7)},
@@ -76,6 +76,26 @@ def _names(d) -> set[str]:
 
 def _by_name(d) -> dict[str, Any]:
     return {s.name: s for s in d.styles}
+
+
+def _effective_size_pt(d, style) -> float | None:
+    """The style's font size in pt, following basedOn and then the document defaults."""
+    seen: set[str] = set()
+    while style is not None and style.name not in seen:
+        seen.add(style.name)
+        if style.font.size is not None:
+            return style.font.size.pt
+        style = style.base_style
+    sz = d.styles.element.find(f"{qn('w:docDefaults')}/{qn('w:rPrDefault')}/{qn('w:rPr')}/{qn('w:sz')}")
+    return None if sz is None else int(sz.get(qn("w:val"))) / 2
+
+
+def tighten_compact(d) -> None:
+    """Tight list items sit at the body's line height with no gaps, as in the PDF (built-in only)."""
+    style = _by_name(d).get("Compact")
+    if style is not None:
+        style.paragraph_format.space_before = Pt(0)
+        style.paragraph_format.space_after = Pt(0)
 
 
 def _rebase_secondaries(d, target: str, secondaries: list[str]) -> None:
@@ -145,7 +165,9 @@ def set_font(style, font_cfg: dict[str, Any]) -> None:
     rfonts.set(qn("w:eastAsia"), family)
 
 
-def apply_look(style, look: dict[str, Any], *, character_only: bool = False) -> None:
+def apply_look(
+    style, look: dict[str, Any], *, character_only: bool = False, size_pt: float | None = None
+) -> None:
     font = style.font
     if look.get("size") is not None:
         font.size = Pt(parse_pt(look["size"]))
@@ -160,8 +182,11 @@ def apply_look(style, look: dict[str, Any], *, character_only: bool = False) -> 
     fmt = style.paragraph_format
     if look.get("align") in _ALIGN:
         fmt.alignment = _ALIGN[look["align"]]
-    if look.get("line_height") is not None:
-        fmt.line_spacing = parse_ratio(look["line_height"])
+    if look.get("line_height") is not None and size_pt is not None:
+        # "exact": Word's "multiple" scales the font's own single line (1.73 × size for Malgun Gothic)
+        spacing = upsert(style.element.get_or_add_pPr(), "w:spacing", PPR_ORDER)
+        spacing.set(qn("w:line"), str(line_twips(parse_ratio(look["line_height"]), size_pt)))
+        spacing.set(qn("w:lineRule"), "exact")
     if look.get("space_before") is not None:
         fmt.space_before = Pt(parse_pt(look["space_before"]))
     if look.get("space_after") is not None:
@@ -175,7 +200,7 @@ def apply_look(style, look: dict[str, Any], *, character_only: bool = False) -> 
         upsert(ppr, "w:shd", PPR_ORDER, val="clear", color="auto", fill=normalize_color(look["background"]))
 
 
-def apply_elements(d, config: dict[str, Any], used: dict[str, list[str]]) -> None:
+def apply_elements(d, config: dict[str, Any], used: dict[str, list[str]], *, fallback_pt: float) -> None:
     """Write looks/fonts present in ``config`` into the style definitions; absent keys are kept."""
     by_name = _by_name(d)
     fonts = config.get("fonts") or {}
@@ -199,6 +224,7 @@ def apply_elements(d, config: dict[str, Any], used: dict[str, list[str]]) -> Non
             style = by_name[name]
             if font_cfg:
                 set_font(style, font_cfg)
-            apply_look(style, look, character_only=name in CHARACTER_ONLY)
+            size_pt = parse_pt(look["size"]) if look.get("size") is not None else _effective_size_pt(d, style)
+            apply_look(style, look, character_only=name in CHARACTER_ONLY, size_pt=size_pt or fallback_pt)
     if "Verbatim Char" in by_name and fonts.get("code"):
         set_font(by_name["Verbatim Char"], fonts["code"])

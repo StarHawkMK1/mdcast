@@ -8,11 +8,18 @@ from docx import Document
 
 from mdcast.ast import convert_doc
 from mdcast.report import Codes
+from mdcast.units import parse_pt
 from mdcast.writers.context import RenderError, WriterContext
 from mdcast.writers.docx.headers import apply_headers
 from mdcast.writers.docx.meta import apply_metadata
 from mdcast.writers.docx.numbering import apply_list_numbering
-from mdcast.writers.docx.styles import apply_elements, apply_page, disable_autospace, remap_styles
+from mdcast.writers.docx.styles import (
+    apply_elements,
+    apply_page,
+    disable_autospace,
+    remap_styles,
+    tighten_compact,
+)
 from mdcast.writers.docx.tables import apply_tables
 from mdcast.writers.images import localize_images
 
@@ -68,9 +75,10 @@ def write_docx(doc: pf.Doc, ctx: WriterContext) -> bytes:
     looks = ctx.template.explicit if container_source == "custom" else config
     if container_source != "custom":
         disable_autospace(d)
+        tighten_compact(d)
     apply_page(d, looks)
     used = remap_styles(d, config, ctx.report)
-    apply_elements(d, looks, used)
+    apply_elements(d, looks, used, fallback_pt=parse_pt(config["elements"]["body"]["size"]))
     apply_headers(d, config, ctx.fields)
     apply_list_numbering(d, config)
     explicit_tables = ctx.template.explicit if container_source == "custom" else None

@@ -31,7 +31,7 @@ def test_default_element_looks(tmp_path):
     body = d.styles["Body Text"]
     assert body.font.size.pt == 11
     assert body.paragraph_format.alignment == WD_ALIGN_PARAGRAPH.JUSTIFY
-    assert body.paragraph_format.line_spacing == 1.6
+    assert _spacing(body) == ("352", "exact")
     rfonts = d.styles["Normal"].element.rPr.rFonts
     assert rfonts.get(qn("w:eastAsia")) == "맑은 고딕"
     assert rfonts.get(qn("w:ascii")) == "Malgun Gothic"
@@ -162,3 +162,48 @@ def test_default_captions_are_not_italic(tmp_path):
     styles = styles_by_name(d)
     for name in ("Table Caption", "Caption"):
         assert styles[name].font.italic is False
+
+
+def _spacing(style) -> tuple[str | None, str | None]:
+    ppr = style.element.pPr
+    spacing = None if ppr is None else ppr.find(qn("w:spacing"))
+    return (None, None) if spacing is None else (spacing.get(qn("w:line")), spacing.get(qn("w:lineRule")))
+
+
+def test_builtin_styles_use_exact_line_height(tmp_path):
+    d, _ = render(tmp_path, "# 제목\n\n본문\n\nTable: 캡션\n\n| a |\n|---|\n| 1 |\n")
+    styles = styles_by_name(d)
+    assert _spacing(styles["Body Text"]) == ("352", "exact")  # 11pt × 160% × 20
+    assert _spacing(styles["First Paragraph"]) == ("352", "exact")
+    assert _spacing(styles["Heading 1"]) == ("416", "exact")  # 16pt × 130%
+    assert _spacing(styles["Table Caption"]) == ("247", "exact")  # 9.5pt × 130%
+    assert _spacing(styles["Footnote Text"]) == ("234", "exact")  # 9pt × 130%
+
+
+def test_builtin_compact_has_no_gaps_and_inherits_the_body_line(tmp_path):
+    d, _ = render(tmp_path, "- 하나\n- 둘\n")
+    compact = styles_by_name(d)["Compact"]
+    assert compact.paragraph_format.space_before == 0 and compact.paragraph_format.space_after == 0
+    assert _spacing(compact)[0] is None  # line height comes from Body Text
+
+
+def _size_pt(d, style) -> float:
+    """Effective font size: the style, its bases, then the document defaults (as the writer does)."""
+    while style is not None:
+        if style.font.size is not None:
+            return style.font.size.pt
+        style = style.base_style
+    sz = d.styles.element.find(f"{qn('w:docDefaults')}/{qn('w:rPrDefault')}/{qn('w:rPr')}/{qn('w:sz')}")
+    return int(sz.get(qn("w:val"))) / 2
+
+
+def test_custom_container_sets_only_the_written_line_heights(tmp_path):
+    tpl = write_template(tmp_path, "t", "name: t\nelements: {body: {line_height: 150%, size: 12pt}, heading1: {line_height: 120%}}\n")
+    make_reference_docx(tpl / "reference.docx")
+    d, _ = render(tmp_path, "# 제목\n\n본문\n", str(tpl))
+    styles = styles_by_name(d)
+    assert _spacing(styles["Body Text"]) == ("360", "exact")  # 12pt × 150%
+    h1 = styles["Heading 1"]
+    assert _spacing(h1) == (str(round(1.2 * _size_pt(d, h1) * 20)), "exact")  # the reference's own size
+    assert _spacing(styles["Heading 2"])[1] != "exact"  # not written: the reference's own
+    assert styles["Compact"].paragraph_format.space_after != 0  # tightening is built-in only
