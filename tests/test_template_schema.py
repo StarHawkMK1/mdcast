@@ -200,7 +200,7 @@ def test_logo_mapping_validated():
 def test_builtin_line_heights_are_all_set():
     default = load_builtin_default()
     expected = {f"heading{i}": "130%" for i in range(1, 7)} | {
-        "body": "180%", "quote": "180%", "code": "130%", "caption": "130%", "footnote": "130%",
+        "body": "180%", "quote": "180%", "code": "160%", "caption": "130%", "footnote": "130%",
     }
     assert {k: v["line_height"] for k, v in default["elements"].items()} == expected
     assert default["tables"]["line_height"] == "130%"

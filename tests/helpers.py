@@ -235,7 +235,7 @@ def hwpx_settings(**changes):
         "body": body,
         "quote": _replace(body, size=10.5, color="#555555", align="left", space_after=0, indent_left=5),
         "code": Look(font="Consolas", font_hangul="맑은 고딕", size=9.5, bold=False, italic=False, color="#000000", align="left",
-                     line_height=1.3, space_before=0, space_after=0, indent_left=0, background="#F6F8FA"),
+                     line_height=1.6, space_before=0, space_after=0, indent_left=0, background="#F6F8FA"),
         "caption": _replace(body, size=9.5, bold=True, align="center", line_height=1.3, space_after=0),
         "footnote": _replace(body, size=9, align="left", line_height=1.3, space_after=0),
     }
