@@ -96,6 +96,23 @@ def _link_notes(elem: pf.Element, notes: dict[str, list[pf.Block]]):
     return out
 
 
+_MATH_SPAN = {"inline": (r"\(", r"\)", "InlineMath"), "display": (r"\[", r"\]", "DisplayMath")}
+
+
+def _span_math(elem: pf.Element, _doc: pf.Doc):
+    r"""``<span class="math inline">\(…\)</span>`` (``display``: ``\[…\]``) back to math."""
+    if not isinstance(elem, pf.Span) or "math" not in elem.classes:
+        return None
+    kinds = [k for k in _MATH_SPAN if k in elem.classes]
+    if len(kinds) != 1:
+        return None
+    start, end, fmt = _MATH_SPAN[kinds[0]]
+    text = pf.stringify(elem)
+    if len(text) < len(start + end) or not (text.startswith(start) and text.endswith(end)):
+        return None
+    return pf.Math(text[len(start):-len(end)], format=fmt)
+
+
 def expand_html_tables(doc: pf.Doc, definitions: dict[str, str] | None = None) -> pf.Doc:
     def is_table(elem: pf.Element) -> bool:
         return isinstance(elem, pf.RawBlock) and elem.format == "html" and bool(_TABLE_START.match(elem.text))
@@ -107,7 +124,7 @@ def expand_html_tables(doc: pf.Doc, definitions: dict[str, str] | None = None) -
 
     def action(elem: pf.Element, _doc: pf.Doc):
         if is_table(elem):
-            blocks = html_to_blocks(elem.text)
+            blocks = [b.walk(_span_math) for b in html_to_blocks(elem.text)]
             if blocks and notes:
                 blocks = [b.walk(lambda e, d: _link_notes(e, notes)) for b in blocks]
             if blocks:

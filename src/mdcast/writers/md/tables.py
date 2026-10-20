@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import re
 import secrets
 from collections.abc import Callable
@@ -11,7 +12,9 @@ from mdcast.ast import convert_doc
 
 PIPE_CELL_FORMAT = "gfm+tex_math_dollars-tex_math_gfm"
 _TAG = re.compile(r"<[A-Za-z][^<>]*>")
-_NOISE_ATTR = re.compile(r'\s(?:style|class|width|height|id)="[^"]*"')
+# the math class is kept: read_md turns <span class="math inline|display"> back into math
+_NOISE_ATTR = re.compile(r'\s(?:style|width|height|id)="[^"]*"|\sclass="(?!math (?:inline|display)")[^"]*"')
+_MATH_SPAN = {"InlineMath": ("inline", r"\(", r"\)"), "DisplayMath": ("display", r"\[", r"\]")}
 
 
 def _has_line_break(cell: pf.TableCell) -> bool:
@@ -120,8 +123,18 @@ def pipe_batch() -> CellBatch:
     return CellBatch(PIPE_CELL_FORMAT, _squeeze)
 
 
+def _math_html(elem: pf.Element, _doc: pf.Doc):
+    """TeX kept as TeX: pandoc's HTML writer would draw it with tags that read back as plain text."""
+    if isinstance(elem, pf.Math):
+        kind, start, end = _MATH_SPAN.get(elem.format, _MATH_SPAN["InlineMath"])
+        return pf.RawInline(f'<span class="math {kind}">{html.escape(start + elem.text + end, quote=False)}</span>', "html")
+    return None
+
+
 def _blocks_html(blocks: list[pf.Block], note_label: Callable[[pf.Note], str], batch: CellBatch) -> str:
-    blocks = [deepcopy(b) for b in blocks]
+    # math in a note stays math: the note is written as markdown after the table
+    stop = (pf.Note, pf.Table)
+    blocks = [deepcopy(b).walk(_math_html, stop_if=lambda e: isinstance(e, stop)) for b in blocks]
 
     def action(elem: pf.Element, _doc: pf.Doc):
         if isinstance(elem, pf.Table):

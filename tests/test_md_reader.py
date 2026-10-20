@@ -111,3 +111,31 @@ def test_notes_not_converted_without_html_table(monkeypatch):
     monkeypatch.setattr(md_module, "md_to_doc", lambda t: calls.append(t) or real(t))
     read(b"a[^1]\n\n[^1]: n\n")
     assert len(calls) == 1
+
+
+def _all(doc: pf.Doc) -> list:
+    found: list = []
+    doc.walk(lambda e, d: found.append(e))
+    return found
+
+
+def test_hand_written_html_table_without_math_reads_as_pandoc_html():
+    from mdcast.ast import html_to_blocks
+
+    html = (
+        '<table><tr><td><span class="note">메모</span> <img src="a.png" alt="그림"></td>'
+        r'<td><span class="math">\(x\)</span> <span class="math inline">\(y</span></td></tr></table>'
+    )
+    md, _ = read(f"{html}\n".encode())
+    assert [b.to_json() for b in md.doc.content] == [b.to_json() for b in html_to_blocks(html)]
+    assert not any(isinstance(e, pf.Math) for e in _all(md.doc))
+
+
+def test_math_span_in_html_table_becomes_math():
+    html = (
+        r'<table><tr><td><span class="math inline">\(a &lt; b\)</span></td>'
+        r'<td><span class="math display">\[\sum i\]</span></td></tr></table>'
+    )
+    md, _ = read(f"{html}\n".encode())
+    found = [(e.format, e.text) for e in _all(md.doc) if isinstance(e, pf.Math)]
+    assert found == [("InlineMath", "a < b"), ("DisplayMath", r"\sum i")]

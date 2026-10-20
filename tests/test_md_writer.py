@@ -286,3 +286,29 @@ def test_cells_of_every_table_render_in_one_pandoc_call_per_format(monkeypatch):
     assert pf.stringify(got[1].content[0].content[-1].content[-1]).strip() == f"m{rows - 1}-5"
     assert spans(got[1])[1][0] == (2, 1) and note_texts(back(md)) == ["칸각주"]
     assert pf.stringify(got[1].content[0].content[2].content[1]).replace("\n", "") == "i1i2i3i4"
+
+
+def maths(doc: pf.Doc) -> list[tuple[str, str]]:
+    found: list[tuple[str, str]] = []
+    doc.walk(lambda e, d: found.append((e.format, e.text)) if isinstance(e, pf.Math) else None)
+    return found
+
+
+def test_math_in_html_table_round_trips_as_math():
+    inline = r"x^2 + \frac{a}{b} < c \& d"
+    display = r"\sum_{i=1}^{n} i"
+    note = pf.Note(pf.Para(pf.Str("각주"), pf.Space(), pf.Math(r"\theta", format="InlineMath")))
+    table = make_table(
+        [[cell(txt("h1")), cell(txt("h2"))]],
+        [
+            [cell(pf.Plain(pf.Math(inline, format="InlineMath"), note), rowspan=2), cell(txt("y"))],
+            [cell(pf.Plain(pf.Math(display, format="DisplayMath")))],
+        ],
+        caption=[pf.Plain(pf.Str("캡션"), pf.Space(), pf.Math("y^3", format="InlineMath"))],
+    )
+    md = write_md(doc_with(table), {})
+    assert '<span class="math inline">' in md and '<span class="math display">' in md
+    assert r"[^t1]: 각주 $\theta$" in md
+    got = back(md)
+    expected = [("InlineMath", "y^3"), ("InlineMath", inline), ("InlineMath", r"\theta"), ("DisplayMath", display)]
+    assert sorted(maths(got)) == sorted(expected)
