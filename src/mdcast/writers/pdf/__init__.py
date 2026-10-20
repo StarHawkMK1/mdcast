@@ -12,7 +12,7 @@ from mdcast.ast import convert_doc
 from mdcast.fonts import font_paths, latin_name, unknown_font_name
 from mdcast.report import Codes, Report
 from mdcast.writers.context import RenderError, WriterContext
-from mdcast.writers.images import localize_images
+from mdcast.writers.images import image_info, localize_images, raster_to_png, with_dpi
 from mdcast.writers.pdf.config import build_typst_config
 
 MAIN_PREAMBLE = (
@@ -42,6 +42,27 @@ def _decodable_by_typst(work_dir: Path):
         return None
 
     return check
+
+
+def _at_96_dpi(work_dir: Path):
+    """``localize_images`` prepare: state 96 dpi in a picture that gives none.
+
+    Typst would take 72 for it; Word, Hangul and the docx and hwpx writers take 96. GIF and WebP
+    hold no dpi, so they become PNGs.
+    """
+
+    def prepare(data: bytes) -> bytes:
+        try:
+            kind, width, _, dpi = image_info(data, 0.0)
+            if dpi:
+                return data
+            if kind in ("gif", "webp"):
+                data = raster_to_png(data, kind, width, work_dir)
+        except (ValueError, typst.TypstError):
+            return data  # left for the decode check to judge
+        return with_dpi(data, 96.0)
+
+    return prepare
 
 
 def _reset_ordered_lists(doc: pf.Doc) -> None:
@@ -77,7 +98,9 @@ def _report_warnings(warnings, ctx: WriterContext, report: Report) -> None:
 
 
 def write_pdf(doc: pf.Doc, ctx: WriterContext) -> bytes:
-    doc = localize_images(doc, ctx, strict_types=True, check=_decodable_by_typst(ctx.work_dir))
+    doc = localize_images(
+        doc, ctx, strict_types=True, check=_decodable_by_typst(ctx.work_dir), prepare=_at_96_dpi(ctx.work_dir)
+    )
     _reset_ordered_lists(doc)
     try:
         body = convert_doc(doc, "typst")

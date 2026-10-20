@@ -44,8 +44,9 @@ def picture_requests(doc: pf.Doc, work_dir: Path) -> dict[str, Request]:
     def collect(elem: pf.Element, _doc: pf.Doc) -> None:
         if isinstance(elem, pf.Image) and elem.url not in requests:
             try:
-                # pandoc and Typst take 72 dpi for a raster image that does not say (hwpx: 96)
-                kind, width, height, dpi = image_info((work_dir / elem.url).read_bytes(), 72.0)
+                # a raster image that does not give its dpi is taken at 96, as Word places it
+                # (pandoc would take 72)
+                kind, width, height, dpi = image_info((work_dir / elem.url).read_bytes())
                 image = Image(b"", kind, width, height, dpi)
             except (OSError, ValueError):
                 image = None

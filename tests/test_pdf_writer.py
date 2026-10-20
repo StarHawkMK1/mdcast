@@ -2,6 +2,7 @@ from pathlib import Path
 
 import panflute as pf
 import pypdfium2 as pdfium
+import pypdfium2.raw as pdfium_c
 import pytest
 from helpers import build, char_origin, line_pitch, write_template
 
@@ -221,3 +222,21 @@ def test_grid_table_columns_take_their_fraction_of_the_body_width(tmp_path, widt
     assert x[2] - x[1] == pytest.approx(widths[1] * body, abs=0.5)
     if width == "full":
         assert x[0] == pytest.approx(20 + 1.5, abs=0.5)  # margin + cell padding
+
+
+def image_widths_mm(data: bytes) -> list[float]:
+    page = pdfium.PdfDocument(data)[0]
+    boxes = [obj.get_bounds() for obj in page.get_objects(filter=[pdfium_c.FPDF_PAGEOBJ_IMAGE])]
+    return [(right - left) * 25.4 / 72 for left, _, right, _ in boxes]
+
+
+@pytest.mark.parametrize(("ext", "kwargs", "dpi"), [
+    ("png", {}, 96), ("jpg", {}, 96), ("gif", {}, 96), ("webp", {}, 96), ("png", {"dpi": (150, 150)}, 150),
+])
+def test_picture_without_its_dpi_is_taken_at_96(tmp_path, ext, kwargs, dpi):
+    # Typst would take 72 dpi; Word, Hangul and the other writers take 96
+    from PIL import Image
+
+    Image.new("RGB", (200, 100), (40, 120, 200)).save(tmp_path / f"a.{ext}", **kwargs)
+    data, _ = render(tmp_path, f"![그림](a.{ext})\n")
+    assert image_widths_mm(data) == pytest.approx([200 / dpi * 25.4], abs=0.05)

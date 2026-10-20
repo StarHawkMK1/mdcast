@@ -2,6 +2,7 @@ import http.server
 import io
 import threading
 import zipfile
+import zlib
 from contextlib import contextmanager
 from dataclasses import replace
 
@@ -14,7 +15,7 @@ from helpers import build, make_reference_docx, tiny_bmp, tiny_jpeg, tiny_png
 from mdcast import pipeline
 from mdcast.report import Codes
 from mdcast.types import Format, Options, Source
-from mdcast.writers.images import image_info, localize_images, webp_to_png
+from mdcast.writers.images import image_info, localize_images, raster_to_png, with_dpi
 
 
 def images(doc):
@@ -334,13 +335,48 @@ def test_image_info_rejects_unknown_bytes():
         image_info(b"not an image")
 
 
-def test_webp_becomes_a_png_of_the_same_pixels(tmp_path):
+@pytest.mark.parametrize("kind", ["webp", "gif"])
+def test_webp_and_gif_become_a_png_of_the_same_pixels(tmp_path, kind):
     from PIL import Image as PILImage
 
-    path = tmp_path / "x.webp"
+    path = tmp_path / f"x.{kind}"
     PILImage.new("RGB", (40, 20), (1, 2, 3)).save(path)
-    png = webp_to_png(path.read_bytes(), 40, tmp_path)
+    png = raster_to_png(path.read_bytes(), kind, 40, tmp_path)
     assert image_info(png)[:3] == ("png", 40, 20)
+
+
+def _strip_app0(jpeg: bytes) -> bytes:
+    assert jpeg[2:4] == b"\xff\xe0"
+    return jpeg[:2] + jpeg[4 + int.from_bytes(jpeg[4:6], "big") :]
+
+
+@pytest.mark.parametrize("name", ["plain.png", "aspect.png", "plain.jpg", "no-jfif.jpg"])
+def test_with_dpi_states_the_dpi_of_png_and_jpeg(tmp_path, name):
+    from PIL import Image as PILImage
+
+    buffer = io.BytesIO()
+    image = PILImage.new("RGB", (40, 20), (1, 2, 3))
+    if name == "aspect.png":  # a pHYs chunk that gives only the aspect ratio (unit 0)
+        image.save(buffer, format="PNG", dpi=(1, 1))
+        data = buffer.getvalue()
+        start = data.index(b"pHYs")  # type, 4+4 bytes of density, 1 byte of unit, then the crc
+        body = data[start : start + 12] + bytes(1)
+        data = data[:start] + body + zlib.crc32(body).to_bytes(4, "big") + data[start + 17 :]
+    else:
+        image.save(buffer, format="PNG" if name.endswith(".png") else "JPEG")
+        data = buffer.getvalue()
+        if name == "no-jfif.jpg":
+            data = _strip_app0(data)
+    assert image_info(data, 0.0)[3] == 0.0
+    marked = with_dpi(data, 96.0)
+    assert image_info(marked, 0.0) == (image_info(data)[0], 40, 20, 96.0)
+    assert PILImage.open(io.BytesIO(marked)).size == (40, 20)
+    assert marked.count(b"pHYs") <= 1
+
+
+def test_with_dpi_leaves_other_formats_alone():
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="4" height="2"/>'
+    assert with_dpi(svg, 96.0) == svg
 
 
 @pytest.mark.parametrize("data", [b"BM" + b"x" * 100, b"BM" + bytes(60), b"\x89PNG\r\n\x1a\n" + (13).to_bytes(4, "big") + b"IHDR" + (10**6).to_bytes(4, "big") * 2 + bytes(5)])

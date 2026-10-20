@@ -42,9 +42,9 @@ def test_wide_picture_shrinks_to_the_body_width(tmp_path):
     assert width == pytest.approx(BODY_MM, abs=0.05)
 
 
-@pytest.mark.parametrize(("dpi", "natural_dpi"), [(None, 72), (150, 150)])
+@pytest.mark.parametrize(("dpi", "natural_dpi"), [(None, 96), (150, 150)])
 def test_small_picture_keeps_its_natural_size(tmp_path, dpi, natural_dpi):
-    # a PNG that does not give its dpi is taken at 72, as pandoc and Typst (the PDF) take it
+    # a PNG that does not give its dpi is taken at 96, as Word and Hangul place it (and hwpx, PDF)
     Image.new("RGB", (200, 100)).save(tmp_path / "small.png", **({"dpi": (dpi, dpi)} if dpi else {}))
     (width,) = widths_mm(render(tmp_path, "![작은 그림](small.png)\n"))
     assert width == pytest.approx(200 / natural_dpi * 25.4, abs=0.05)

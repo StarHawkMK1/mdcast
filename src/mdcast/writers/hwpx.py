@@ -22,7 +22,7 @@ from mdcast.writers.images import (
     image_complete,
     image_info,
     localize_images,
-    webp_to_png,
+    raster_to_png,
 )
 
 # what the PDF uses where the built-in template leaves a key empty (spec §4.3), so Hangul's
@@ -218,7 +218,7 @@ def _load_images(doc: pf.Doc, ctx: WriterContext) -> tuple[pf.Doc, dict[str, hwp
             if not image_complete(kind, data):
                 return "이미지 파일이 손상되었습니다"
             if kind == "webp":
-                file.write_bytes(webp_to_png(data, width, ctx.work_dir))
+                file.write_bytes(raster_to_png(data, kind, width, ctx.work_dir))
                 return None
         except (ValueError, OSError, typst.TypstError):
             return "크기를 읽을 수 없는 이미지입니다"
