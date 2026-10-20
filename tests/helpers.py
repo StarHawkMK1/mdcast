@@ -199,6 +199,8 @@ def hwpx_integrity(data: bytes) -> dict:
         assert p.get("paraPrIDRef") in paras and p.get("styleIDRef") in styles
     for run in section.iter(hp("run")):
         assert run.get("charPrIDRef") in chars
+    for element in (*section.iter(hp("tbl")), *section.iter(hp("tc"))):
+        assert element.get("borderFillIDRef") in fills, element.tag
     begins = {b.get("id") for b in section.iter(hp("fieldBegin"))}
     for end in section.iter(hp("fieldEnd")):
         assert end.get("beginIDRef") in begins
@@ -251,7 +253,7 @@ def hwpx_render(md: str, settings=None, doc=None):
     header = Header(Package.read(builtin_hwpx()).xml("Contents/header.xml"))
     notices = Notices()
     shapes = build_shapes(header, settings, notices)
-    paragraphs = SectionWriter(header, shapes, settings, notices).build(doc or md_to_doc(md))
+    paragraphs = SectionWriter(header, shapes, settings, notices, width=170.0).build(doc or md_to_doc(md))
     return header, shapes, paragraphs, notices
 
 

@@ -1,8 +1,11 @@
 import pytest
+from helpers import HWPX_NS as NS
+from helpers import hwpx_render, hwpx_settings, hwpx_texts
 
 from mdcast.ast import md_to_doc
-from mdcast.hwpx.look import TableLook
+from mdcast.hwpx.look import Border, TableLook
 from mdcast.hwpx.table import build_grid, column_widths, slot_fill, slot_sides, slot_valign
+from mdcast.hwpx.units import hwpunit
 
 MERGED = (
     "+------+------------+--------------------------+\n"
@@ -70,3 +73,90 @@ def test_outer_sides_and_fill_priority():
     assert slot_sides(c1, grid, look) == (look.border, look.border_outer, look.border, look.border_outer)
     assert [slot_fill(s, look) for s in (h0, h1, b0, b1, c0, c1)] == ["#H", "#H", "#F", None, "#F", "#Z"]
     assert slot_valign(h0, TableLook(header_valign="bottom")) == "BOTTOM"
+
+
+def tbl(paragraphs):
+    return next(t for p in paragraphs for t in p.iter(f"{{{NS['hp']}}}tbl"))
+
+
+def test_table_xml_matches_the_sample_shape():
+    _, _, paragraphs, notices = hwpx_render(MERGED)
+    t = tbl(paragraphs)
+    assert (t.get("rowCnt"), t.get("colCnt"), t.get("repeatHeader"), t.get("pageBreak")) == ("3", "5", "1", "CELL")
+    assert [c.tag.split("}")[1] for c in t][:4] == ["sz", "pos", "outMargin", "inMargin"]
+    assert t.find("hp:pos", NS).get("treatAsChar") == "1"
+    assert int(t.find("hp:sz", NS).get("width")) == hwpunit(170.0)
+    cells = t.findall("hp:tr/hp:tc", NS)
+    assert len(cells) == 11  # 15 places in the 3x5 grid, 4 covered by the two spans
+    assert [c.get("header") for c in cells[:6]] == ["1"] * 6
+    first = cells[0]
+    assert first.find("hp:cellSpan", NS).attrib == {"colSpan": "1", "rowSpan": "2"}
+    assert first.find("hp:subList", NS).get("vertAlign") == "CENTER"
+    assert first.find("hp:cellMargin", NS).get("left") == str(hwpunit(1.5))
+    body = cells[6:]  # the five body cells, one per column
+    assert sum(int(c.find("hp:cellSz", NS).get("width")) for c in body) == int(t.find("hp:sz", NS).get("width"))
+    assert notices.items == []
+
+
+def test_table_paragraph_ends_with_an_empty_text():
+    _, _, paragraphs, _ = hwpx_render("| a |\n|---|\n| 1 |\n")
+    run = tbl(paragraphs).getparent()
+    assert [c.tag.split("}")[1] for c in run] == ["tbl", "t"]
+
+
+def test_header_cells_get_the_header_background():
+    header, _, paragraphs, _ = hwpx_render("| a | b |\n|---|---|\n| 1 | 2 |\n",
+                                           hwpx_settings(tables={None: TableLook(header_background="#F2F2F2")}))
+    cells = tbl(paragraphs).findall("hp:tr/hp:tc", NS)
+    faces = [header.item("borderFills", c.get("borderFillIDRef")).find(".//hc:winBrush", NS) for c in cells]
+    assert [f is not None and f.get("faceColor") for f in faces] == ["#F2F2F2", "#F2F2F2", False, False]
+
+
+def test_variant_attribute_picks_the_variant_look():
+    doc = md_to_doc("| a |\n|---|\n| 1 |\n")
+    doc.content[0].attributes["mdcast-variant"] = "얇게"
+    looks = {None: TableLook(), "얇게": TableLook(border=Border(0.34), border_outer=Border(0.34))}
+    header, _, paragraphs, _ = hwpx_render("", hwpx_settings(tables=looks), doc=doc)
+    fill = header.item("borderFills", tbl(paragraphs).find("hp:tr/hp:tc", NS).get("borderFillIDRef"))
+    assert {e.get("width") for e in fill if e.tag.endswith("Border")} == {"0.12 mm"}
+
+
+def test_caption_is_a_hangul_caption_without_autonum():
+    _, shapes, paragraphs, _ = hwpx_render("Table: <표 1> 요약\n\n| a |\n|---|\n| 1 |\n")
+    caption = tbl(paragraphs).find("hp:caption", NS)
+    assert caption.get("side") == "TOP"
+    p = caption.find("hp:subList/hp:p", NS)
+    assert p.get("styleIDRef") == shapes["caption"].style
+    assert p.find(".//hp:autoNum", NS) is None and "요약" in "".join(p.itertext())
+
+
+def test_cell_paragraphs_use_the_table_size_and_cell_alignment():
+    header, _, paragraphs, _ = hwpx_render("| a |\n|--:|\n| 1 |\n", hwpx_settings(tables={None: TableLook(font_size=9.0)}))
+    p = tbl(paragraphs).find("hp:tr/hp:tc/hp:subList/hp:p", NS)
+    char = header.item("charProperties", p.find("hp:run", NS).get("charPrIDRef"))
+    para = header.item("paraProperties", p.get("paraPrIDRef"))
+    assert char.get("height") == "900"
+    assert para.find(".//hh:align", NS).get("horizontal") == "RIGHT"
+
+
+def test_nested_table_uses_the_cell_inner_width():
+    doc = md_to_doc("| 바깥 |\n|---|\n| x |\n")
+    inner = md_to_doc("| 안 |\n|---|\n| y |\n").content[0]
+    doc.content[0].content[0].content[0].content[0].content = [inner]
+    _, _, paragraphs, _ = hwpx_render("", doc=doc)
+    nested = tbl(paragraphs).find(".//hp:tc//hp:tbl", NS)
+    assert abs(int(nested.find("hp:sz", NS).get("width")) - (hwpunit(170.0) - 2 * hwpunit(1.5))) <= 1
+
+
+def test_table_in_list_item_is_narrower():
+    _, _, paragraphs, _ = hwpx_render("- 항목\n\n    | a |\n    |---|\n    | 1 |\n")
+    assert int(tbl(paragraphs).find("hp:sz", NS).get("width")) < hwpunit(170.0)
+
+
+def test_empty_table_writes_only_its_caption():
+    doc = md_to_doc("Table: 빈 표\n\n| a |\n|---|\n| 1 |\n")
+    t = doc.content[0]
+    t.head.content = []
+    t.content[0].content = []
+    _, _, paragraphs, _ = hwpx_render("", doc=doc)
+    assert hwpx_texts(paragraphs) == ["빈 표"]

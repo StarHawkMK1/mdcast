@@ -47,9 +47,10 @@ def test_pagebreak_marker_reaches_hwpx(tmp_path):
 
 
 def test_degraded_elements_warn_once(tmp_path):
-    _, ctx = render(tmp_path, "| a |\n|---|\n| 1 |\n\n| b |\n|---|\n| 2 |\n")
+    _, ctx = render(tmp_path, "식 $x$ 그리고 $y$\n\n| a |\n|---|\n| 1 |\n")
     events = [(e.code, e.where.get("element")) for e in ctx.report.events if e.where.get("format") == "hwpx"]
-    assert events.count((Codes.RENDER_WARNING, "table")) == 1
+    assert events.count((Codes.RENDER_WARNING, "math")) == 1
+    assert (Codes.RENDER_WARNING, "table") not in events
 
 
 def test_custom_container_gets_only_explicit_values(tmp_path):

@@ -1,22 +1,8 @@
-from helpers import hwpx_render, hwpx_settings, hwpx_texts
+from helpers import hwpx_render, hwpx_texts
 
 
 def kinds(notices):
     return [(n.kind, n.element) for n in notices.items]
-
-
-def test_tables_become_row_paragraphs_with_one_notice():
-    md = "Table: 요약\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n| c |\n|---|\n| 3 |\n"
-    _, shapes, paragraphs, notices = hwpx_render(md)
-    assert hwpx_texts(paragraphs) == ["요약", "a | b", "1 | 2", "c", "3"]
-    assert paragraphs[0].get("styleIDRef") == shapes["caption"].style
-    assert kinds(notices) == [("degraded", "table")]
-
-
-def test_table_caption_below_when_configured():
-    md = "Table: 요약\n\n| a |\n|---|\n| 1 |\n"
-    _, _, paragraphs, _ = hwpx_render(md, hwpx_settings(table_caption_above=False))
-    assert hwpx_texts(paragraphs) == ["a", "1", "요약"]
 
 
 def test_images_become_placeholders_and_figure_captions_stay():

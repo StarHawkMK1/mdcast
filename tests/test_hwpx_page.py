@@ -25,7 +25,7 @@ def build(md="본문\n", container=None, **changes):
     section = package.xml("Contents/section0.xml")
     notices = Notices()
     shapes = build_shapes(header, settings, notices)
-    paragraphs = SectionWriter(header, shapes, settings, notices).build(md_to_doc(md))
+    paragraphs = SectionWriter(header, shapes, settings, notices, width=170.0).build(md_to_doc(md))
     assemble(section, paragraphs, header, shapes, settings)
     package.set_xml("Contents/header.xml", header.root)
     package.set_xml("Contents/section0.xml", section)

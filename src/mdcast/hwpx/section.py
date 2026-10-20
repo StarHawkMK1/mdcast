@@ -4,15 +4,25 @@ from __future__ import annotations
 
 import itertools
 import re
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 
 import panflute as pf
 from lxml import etree
 
 from mdcast.hwpx.header import CharSpec, Header, ParaSpec
-from mdcast.hwpx.look import Notices, Settings
+from mdcast.hwpx.look import Notices, Settings, TableLook
 from mdcast.hwpx.shapes import Shape
-from mdcast.hwpx.table import text_em
+from mdcast.hwpx.table import (
+    Slot,
+    build_grid,
+    column_widths,
+    slot_fill,
+    slot_sides,
+    slot_valign,
+    text_em,
+)
+from mdcast.hwpx.units import hwpunit
 
 HP = "http://www.hancom.co.kr/hwpml/2011/paragraph"
 PAGE_BREAK = ("mdcast-hwpx", "pagebreak")  # raw block the pagebreak filter writes for hwpx
@@ -21,8 +31,14 @@ HYPERLINK_FIELD = "627600491"  # '%hlk'
 _CONTROL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f￾￿]")  # not allowed in XML
 _GAP_EM = 0.5  # between a list marker and its text, as the docx writer
 _MIN_HANGING_MM = 3.0
+_MIN_WIDTH_MM = 10.0  # narrowest room offered to a table or picture
+_OBJECT_POS = {  # tables and pictures sit in the text like a character (appendix B-1, B-9)
+    "treatAsChar": "1", "affectLSpacing": "0", "flowWithText": "1", "allowOverlap": "0", "holdAnchorAndSO": "0",
+    "vertRelTo": "PARA", "horzRelTo": "PARA", "vertAlign": "TOP", "horzAlign": "LEFT", "vertOffset": "0",
+    "horzOffset": "0",
+}
+_ALIGN = {"AlignLeft": "left", "AlignCenter": "center", "AlignRight": "right"}
 _DEGRADED = {
-    "table": "hwpx 표는 M2b 에서 지원합니다 — 행마다 한 문단으로 낮춰 썼습니다",
     "image": "hwpx 이미지는 M2b 에서 지원합니다 — [이미지: 설명] 으로 대신 썼습니다",
     "footnote": "hwpx 각주는 M2b 에서 지원합니다 — 문서 끝에 모아 썼습니다",
     "math": "hwpx 수식은 M4 에서 이미지로 지원합니다 — LaTeX 원문을 썼습니다",
@@ -94,6 +110,12 @@ class Paragraph:
         attrs = {"width": "0", "leader": "0", "type": "1"} if kind == "tab" else {}
         etree.SubElement(self._t(char), hp(kind), attrs)
 
+    def object(self, char: str, element: etree._Element) -> None:
+        """A table or picture in the run, followed by an empty ``hp:t`` (appendix B-1)."""
+        run = self._run_for(char)
+        run.append(element)
+        self._text = etree.SubElement(run, hp("t"))
+
     def control(self, char: str) -> etree._Element:
         ctrl = etree.SubElement(self._run_for(char), hp("ctrl"))
         self._text = None
@@ -113,11 +135,33 @@ class Context:
     level: int = 0  # list depth
     list_text: float = 0.0  # mm: where the enclosing list item's text starts
     tight: bool = False  # no paragraph gaps (tight list items)
+    width: float = 0.0  # mm: the column this text flows in (body, table cell, footnote)
+    align: str | None = None  # paragraph alignment imposed here (table cells)
+    note: bool = False  # inside a footnote or caption: notes there fall back (spec 2026-10-20 §6)
+
+
+def sub_list(paragraphs: list[etree._Element], valign: str) -> etree._Element:
+    """The paragraph list of a cell, caption or footnote (appendix B-1)."""
+    element = etree.Element(
+        hp("subList"), id="", textDirection="HORIZONTAL", lineWrap="BREAK", vertAlign=valign,
+        linkListIDRef="0", linkListNextIDRef="0", textWidth="0", textHeight="0", hasTextRef="0", hasNumRef="0",
+    )
+    element.extend(paragraphs)
+    return element
+
+
+def _mm(units: int) -> float:
+    return units * 25.4 / 7200
 
 
 class SectionWriter:
-    def __init__(self, header: Header, shapes: dict[str, Shape], settings: Settings, notices: Notices) -> None:
+    def __init__(self, header: Header, shapes: dict[str, Shape], settings: Settings, notices: Notices,
+                 width: float, pictures=None, note_format: etree._Element | None = None) -> None:
         self.header = header
+        self.width = width
+        self.pictures = pictures
+        self.note_format = note_format
+        self._objects = itertools.count(1)
         self.shapes = shapes
         self.settings = settings
         self.notices = notices
@@ -130,14 +174,28 @@ class SectionWriter:
     # paragraphs ---------------------------------------------------------------------------
 
     def build(self, doc: pf.Doc) -> list[etree._Element]:
-        self.blocks(doc.content, Context())
+        self.blocks(doc.content, Context(width=self.width))
         index = 0
         while index < len(self._notes):  # a note may hold notes
             self._note(index + 1, self._notes[index])
             index += 1
         if not self.paragraphs:
-            self.paragraph("body", Context())
+            self.paragraph("body", Context(width=self.width))
         return [p.finish() for p in self.paragraphs]
+
+    @contextmanager
+    def _collect(self):
+        """Build paragraphs into a list of their own (cells, captions, footnotes)."""
+        outer, page_break = self.paragraphs, self._page_break
+        self.paragraphs, self._page_break = [], False
+        try:
+            yield self.paragraphs
+        finally:
+            self.paragraphs, self._page_break = outer, page_break
+
+    def available(self, ctx: Context, element: str) -> float:
+        """mm a table or picture may take here: the column less the paragraph's left indent."""
+        return max(ctx.width - self._left(element, ctx), _MIN_WIDTH_MM)
 
     def _left(self, element: str, ctx: Context) -> float:
         own = self.header.para_left(self.shapes[element].para)
@@ -147,6 +205,8 @@ class SectionWriter:
     def _para_id(self, element: str, ctx: Context, **changes) -> str:
         shape = self.shapes[element]
         left = self._left(element, ctx)
+        if ctx.align is not None and "align" not in changes:
+            changes["align"] = ctx.align
         if abs(left - self.header.para_left(shape.para)) < 1e-6 and not ctx.tight and not changes:
             return shape.para
         gaps = {"prev": 0.0, "next": 0.0} if ctx.tight else {}
@@ -244,34 +304,91 @@ class SectionWriter:
             for rest in blocks:
                 self.block(rest, replace(inner, tight=isinstance(rest, pf.Plain)))
 
-    # degraded until M2b (spec §5.6) -------------------------------------------------------
+    # tables (spec 2026-10-20 §4, appendix B-1) ---------------------------------------------
 
     def table(self, table: pf.Table, ctx: Context) -> None:
-        self.notices.add("degraded", "table", _DEGRADED["table"])
+        grid = build_grid(table)
         caption = self._caption_blocks(table.caption)
-        above = self.settings.table_caption_above
-        if caption and above:
-            self._caption(caption, ctx)
-        rows = list(table.head.content) if table.head else []
-        for body in table.content:
-            rows += list(body.head) + list(body.content)
-        if table.foot:
-            rows += list(table.foot.content)
-        char = self.shapes[ctx.element].char
-        for row in rows:
-            paragraph = self.paragraph(ctx.element, ctx)
-            for index, cell in enumerate(row.content):
-                if index:
-                    paragraph.text(char, " | ")
-                for number, inner in enumerate(cell.content):
-                    if number:
-                        paragraph.text(char, " ")
-                    if isinstance(inner, (pf.Para, pf.Plain)):
-                        self.inlines(paragraph, inner.content, char)
-                    else:
-                        paragraph.text(char, pf.stringify(inner))
-        if caption and not above:
-            self._caption(caption, ctx)
+        if not grid.rows or not grid.cols:
+            if caption:
+                self._caption(caption, ctx)
+            return
+        tables = self.settings.tables
+        look = tables.get(table.attributes.get("mdcast-variant")) or tables.get(None) or TableLook()
+        size = look.font_size or self.settings.body_size
+        available = self.available(ctx, ctx.element)
+        units = [hwpunit(w) for w in column_widths(table, grid, look, available, size)]
+        total = hwpunit(available) if look.width == "full" else sum(units)
+        units[-1] += total - sum(units)
+        pad = hwpunit(look.padding)
+        row_height = hwpunit(size * 25.4 / 72 * (look.line_height or 1.0)) + 2 * pad
+        anchor = self.paragraph(ctx.element, ctx)
+
+        number = str(next(self._objects))
+        element = etree.Element(
+            hp("tbl"), id=number, zOrder=number, numberingType="TABLE", textWrap="TOP_AND_BOTTOM",
+            textFlow="BOTH_SIDES", lock="0", dropcapstyle="None", pageBreak="CELL",
+            repeatHeader="1" if look.header_repeat else "0", rowCnt=str(len(grid.rows)), colCnt=str(grid.cols),
+            cellSpacing="0", borderFillIDRef=self.header.add_cell_border_fill((None,) * 4, None), noAdjust="0",
+        )
+        etree.SubElement(element, hp("sz"), width=str(total), widthRelTo="ABSOLUTE",
+                         height=str(row_height * len(grid.rows)), heightRelTo="ABSOLUTE", protect="0")
+        etree.SubElement(element, hp("pos"), **_OBJECT_POS)
+        etree.SubElement(element, hp("outMargin"), left="0", right="0", top="0", bottom="0")
+        if caption:
+            element.append(self.caption_element(caption, total, self.settings.table_caption_above))
+        margins = {"left": str(pad), "right": str(pad), "top": str(pad), "bottom": str(pad)}
+        etree.SubElement(element, hp("inMargin"), margins)
+        shapes = self._cell_shapes(size, look)
+        for row in grid.rows:
+            tr = etree.SubElement(element, hp("tr"))
+            for slot in row:
+                width = sum(units[slot.col : slot.col + slot.colspan])
+                fill = self.header.add_cell_border_fill(slot_sides(slot, grid, look), slot_fill(slot, look))
+                tc = etree.SubElement(
+                    tr, hp("tc"), name="", header="1" if slot.part == "head" else "0", hasMargin="0",
+                    protect="0", editable="0", dirty="0", borderFillIDRef=fill,
+                )
+                inner = _mm(width) - 2 * look.padding
+                tc.append(sub_list(self._cell(table, slot, shapes, inner, ctx), slot_valign(slot, look)))
+                etree.SubElement(tc, hp("cellAddr"), colAddr=str(slot.col), rowAddr=str(slot.row))
+                etree.SubElement(tc, hp("cellSpan"), colSpan=str(slot.colspan), rowSpan=str(slot.rowspan))
+                etree.SubElement(tc, hp("cellSz"), width=str(width), height=str(row_height * slot.rowspan))
+                etree.SubElement(tc, hp("cellMargin"), margins)
+        anchor.object(self.shapes[ctx.element].char, element)
+
+    def _cell_shapes(self, size: float, look: TableLook) -> dict[str, Shape]:
+        """The element shapes with the body at the table's size and line height, no paragraph gaps."""
+        body = self.shapes["body"]
+        para = self.header.add_para(body.para, ParaSpec(line_height=look.line_height, prev=0.0, next=0.0))
+        char = self.header.add_char(body.char, CharSpec(size=size))
+        return {**self.shapes, "body": Shape(body.style, para, char, body.look)}
+
+    def _cell(self, table: pf.Table, slot: Slot, shapes: dict[str, Shape], inner: float,
+              ctx: Context) -> list[etree._Element]:
+        alignment = slot.cell.alignment if slot.cell is not None else "AlignDefault"
+        if alignment == "AlignDefault" and slot.col < len(table.colspec):
+            alignment = table.colspec[slot.col][0]
+        cell_ctx = Context(width=inner, align=_ALIGN.get(alignment), note=ctx.note)
+        outer = self.shapes
+        self.shapes = shapes
+        try:
+            with self._collect() as paragraphs:
+                self.blocks(list(slot.cell.content) if slot.cell is not None else [], cell_ctx)
+                if not paragraphs:
+                    self.paragraph("body", cell_ctx)
+        finally:
+            self.shapes = outer
+        return [p.finish() for p in paragraphs]
+
+    def caption_element(self, blocks: list[pf.Element], width: int, above: bool) -> etree._Element:
+        """Hangul's caption on a table or picture, without Hangul's own number (appendix B-8)."""
+        caption = etree.Element(hp("caption"), side="TOP" if above else "BOTTOM", fullSz="0", width="8504",
+                                gap="850", lastWidth=str(width))
+        with self._collect() as paragraphs:
+            self._caption(blocks, Context(element="caption", width=_mm(width), note=True))
+        caption.append(sub_list([p.finish() for p in paragraphs], "TOP"))
+        return caption
 
     def figure(self, figure: pf.Figure, ctx: Context) -> None:
         caption = self._caption_blocks(figure.caption)
@@ -293,7 +410,7 @@ class SectionWriter:
             self.inlines(self.paragraph("caption", ctx), block.content, self.shapes["caption"].char)
 
     def _note(self, number: int, blocks: list[pf.Element]) -> None:
-        ctx = Context(element="footnote")
+        ctx = Context(element="footnote", width=self.width, note=True)
         char = self.shapes["footnote"].char
         paragraph = self.paragraph("footnote", ctx)
         paragraph.text(char, f"[{number}] ")
