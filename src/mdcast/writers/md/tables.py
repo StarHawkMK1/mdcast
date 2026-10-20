@@ -24,6 +24,18 @@ def _has_note(cell: pf.TableCell) -> bool:
     return bool(found)
 
 
+def _has_pipe(cell: pf.TableCell) -> bool:
+    found: list[bool] = []
+
+    def look(e: pf.Element, _d: pf.Doc) -> None:
+        for attr in ("text", "url"):
+            if "|" in (getattr(e, attr, "") or ""):
+                found.append(True)
+
+    cell.walk(look)
+    return bool(found)
+
+
 def _rows(table: pf.Table) -> list[pf.TableRow]:
     rows = list(table.head.content) if table.head else []
     for body in table.content:
@@ -46,7 +58,7 @@ def is_simple_table(table: pf.Table) -> bool:
                 return False
             if any(not isinstance(b, (pf.Plain, pf.Para)) for b in cell.content):
                 return False
-            if _has_line_break(cell) or _has_note(cell):
+            if _has_line_break(cell) or _has_note(cell) or _has_pipe(cell):
                 return False
     return True
 
@@ -113,7 +125,7 @@ def _pipe_cell(cell: pf.TableCell) -> str:
     if not cell.content:
         return ""
     text = convert_doc(pf.Doc(deepcopy(cell.content[0])), "gfm+tex_math_dollars-tex_math_gfm", extra_args=["--wrap=none"])
-    return " ".join(text.split()).replace("|", "\\|")
+    return " ".join(text.split())
 
 
 def table_to_pipe(table: pf.Table) -> str:

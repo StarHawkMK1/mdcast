@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from copy import deepcopy
+
 import panflute as pf
 import yaml
 
@@ -37,6 +39,36 @@ def _note_definition(label: str, note: pf.Note) -> str:
     return "\n".join(lines)
 
 
+def _caption_inlines(figure: pf.Figure) -> list[pf.Inline]:
+    out: list[pf.Inline] = []
+    for block in figure.caption.content if figure.caption else []:
+        if isinstance(block, (pf.Plain, pf.Para)):
+            out += list(block.content)
+    return out
+
+
+def _figure_blocks(figure: pf.Figure) -> list[pf.Block]:
+    """A captioned figure becomes `![caption](path)`; extra content is kept as-is."""
+    caption = _caption_inlines(figure)
+    blocks = [deepcopy(b) for b in figure.content]
+    images: list[pf.Image] = []
+    for block in blocks:
+        block.walk(lambda e, d: images.append(e) if isinstance(e, pf.Image) else None)
+    if caption and len(images) == 1:
+        images[0].content = [deepcopy(i) for i in caption]
+    elif caption:
+        blocks.append(pf.Para(*caption))
+    return [pf.Para(*b.content) if isinstance(b, pf.Plain) else b for b in blocks]
+
+
+def _prepare(elem: pf.Element, _doc: pf.Doc):
+    if isinstance(elem, pf.Figure):
+        return _figure_blocks(elem)
+    if isinstance(elem, pf.Image) and " " in elem.url:
+        elem.url = elem.url.replace(" ", "%20")  # read_md decodes %20 back to a space
+    return None
+
+
 def write_md(doc: pf.Doc, frontmatter: dict[str, Any]) -> str:
     doc = clone(doc)
     cell_notes: list[pf.Note] = []
@@ -50,10 +82,9 @@ def write_md(doc: pf.Doc, frontmatter: dict[str, Any]) -> str:
             if is_simple_table(elem):
                 return pf.RawBlock(table_to_pipe(elem), "gfm")
             return pf.RawBlock(table_to_html(elem, note_label), "html")
-        if isinstance(elem, pf.Image) and " " in elem.url:
-            elem.url = elem.url.replace(" ", "%20")  # read_md decodes %20 back to a space
         return None
 
+    doc = doc.walk(_prepare)
     doc = doc.walk(action, stop_if=lambda e: isinstance(e, pf.Table))
     body = _convert(doc).rstrip("\n")
     definitions = [_note_definition(f"t{i}", n) for i, n in enumerate(cell_notes, 1)]

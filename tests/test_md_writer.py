@@ -168,3 +168,71 @@ def test_cell_notes_numbered_across_document_and_multiblock_definition():
     assert "[^t1]" in md and "[^t2]" in md
     assert "\n[^t1]: 가\n\n    가-2\n" in md
     assert note_texts(back(md)) == ["가\n\n가-2", "나\n\n나-2"]
+
+
+def figure(url: str, caption: str) -> pf.Figure:
+    return pf.Figure(
+        pf.Plain(pf.Image(pf.Str("alt"), url=url)),
+        caption=pf.Caption(pf.Plain(pf.Str(caption))),
+    )
+
+
+def test_captioned_figure_becomes_image_with_caption_alt():
+    md = write_md(doc_with(figure("그림 폴더/a.png", "도표1")), {})
+    assert "<figure" not in md and "![도표1](" in md
+    image = first(back(md), pf.Image)
+    assert pf.stringify(image) == "도표1" and image.url == "그림 폴더/a.png"
+
+
+def test_figure_in_html_cell_becomes_image():
+    table = make_table(
+        [[cell(txt("a")), cell(txt("b"))]],
+        [[cell(figure("x.png", "셀 그림"), colspan=2)]],
+    )
+    md = write_md(doc_with(table), {})
+    assert "<figure" not in md
+    assert pf.stringify(first(back(md), pf.Image)) == "셀 그림"
+
+
+def test_figure_with_two_images_keeps_everything():
+    fig = pf.Figure(
+        pf.Plain(pf.Image(pf.Str("a"), url="1.png")),
+        pf.Plain(pf.Image(pf.Str("b"), url="2.png")),
+        caption=pf.Caption(pf.Plain(pf.Str("공통"))),
+    )
+    got = back(write_md(doc_with(fig), {}))
+    urls = []
+    got.walk(lambda e, d: urls.append(e.url) if isinstance(e, pf.Image) else None)
+    assert urls == ["1.png", "2.png"] and "공통" in pf.stringify(got)
+
+
+def pipe_table(inline) -> pf.Table:
+    return make_table([[cell(txt("h1")), cell(txt("h2"))]], [[cell(pf.Plain(inline)), cell(txt("z"))]])
+
+
+def test_pipes_in_cells_round_trip_via_html():
+    for inline in (pf.Str("a|b"), pf.Code("a|b"), pf.Math("a|b", format="InlineMath")):
+        md = write_md(doc_with(pipe_table(inline)), {})
+        assert "<table>" in md
+        got = tables(back(md))[0]
+        assert spans(got) == [[(1, 1), (1, 1)], [(1, 1), (1, 1)]]
+        assert "a|b" in pf.stringify(got.content[0].content[0].content[0])
+
+
+def test_image_path_with_space_in_pipe_cell_and_cell_note_is_encoded():
+    image = pf.Image(pf.Str("그림"), url="보고 서/a.png")
+    md = write_md(doc_with(make_table([[cell(txt("h1"))]], [[cell(pf.Plain(image))]])), {})
+    assert "(보고%20서/a.png)" in md
+    assert first(back(md), pf.Image).url == "보고 서/a.png"
+    note = pf.Note(pf.Para(pf.Image(pf.Str("n"), url="보고 서/b.png")))
+    merged = make_table(
+        [[cell(txt("h1")), cell(txt("h2"))]],
+        [[cell(pf.Plain(pf.Str("x"), note), rowspan=2), cell(txt("y"))], [cell(txt("z"))]],
+    )
+    md = write_md(doc_with(merged), {})
+    assert "[^t1]: ![n](보고%20서/b.png)" in md
+
+
+def test_remote_image_url_keeps_percent_encoding():
+    got = back("![x](https://example.com/a%20b.png)\n")
+    assert first(got, pf.Image).url == "https://example.com/a%20b.png"

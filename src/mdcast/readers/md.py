@@ -117,11 +117,14 @@ def expand_html_tables(doc: pf.Doc, definitions: dict[str, str] | None = None) -
     return doc.walk(action)
 
 
+_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]+:")
+
+
 def _decode_image_paths(doc: pf.Doc) -> pf.Doc:
     """pandoc percent-encodes spaces in link destinations; local image paths must keep them."""
 
     def action(elem: pf.Element, _doc: pf.Doc):
-        if isinstance(elem, pf.Image) and "%20" in elem.url:
+        if isinstance(elem, pf.Image) and "%20" in elem.url and not _SCHEME.match(elem.url):
             elem.url = elem.url.replace("%20", " ")
         return None
 
