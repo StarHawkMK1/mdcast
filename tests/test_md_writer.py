@@ -95,6 +95,19 @@ def test_simple_table_is_pipe_and_merged_is_clean_html():
     assert spans(t[1]) == spans(merged_table_with_note()) and note_texts(back(md)) == ["칸 각주."]
 
 
+def test_one_paragraph_caption_reads_back_as_plain():
+    # pandoc's docx reader gives the caption as Para; `<caption><p>` would come back as Para
+    captioned = make_table(
+        [[cell(txt("a")), cell(txt("b"))]],
+        [[cell(txt("1")), cell(txt("2"))]],
+        caption=[pf.Para(pf.Str("요약"), pf.Space(), pf.Str("표"))],
+    )
+    md = write_md(doc_with(captioned), {})
+    assert "<caption>요약 표</caption>" in md
+    caption = tables(back(md))[0].caption.content
+    assert len(caption) == 1 and isinstance(caption[0], pf.Plain)
+
+
 def test_captioned_or_multiblock_cells_use_html():
     captioned = make_table(
         [[cell(txt("a")), cell(txt("b"))]],

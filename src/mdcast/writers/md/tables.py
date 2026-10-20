@@ -99,7 +99,11 @@ def _row_html(row: pf.TableRow, tag: str, note_label: Callable[[pf.Note], str]) 
 def table_to_html(table: pf.Table, note_label: Callable[[pf.Note], str]) -> str:
     out = ["<table>"]
     if table.caption and table.caption.content:
-        out.append(f"<caption>{_blocks_html(list(table.caption.content), note_label)}</caption>")
+        caption = list(table.caption.content)
+        if len(caption) == 1 and isinstance(caption[0], pf.Para):
+            # one paragraph is written bare, so it reads back as Plain like a `Table:` caption
+            caption = [pf.Plain(*deepcopy(list(caption[0].content)))]
+        out.append(f"<caption>{_blocks_html(caption, note_label)}</caption>")
     if table.head and table.head.content:
         out.append("<thead>")
         out += [_row_html(r, "th", note_label) for r in table.head.content]
