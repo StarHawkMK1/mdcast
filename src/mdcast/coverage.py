@@ -28,6 +28,24 @@ def _forms(text: str, prefixes: Sequence[re.Pattern[str]]) -> list[str]:
     return [f for f in (_squash(f) for f in forms) if f]
 
 
+def _text_with_notes_apart(doc: pf.Doc) -> str:
+    """Body text with each footnote taken out of its sentence and appended after the body.
+
+    ``pf.stringify`` would put the note's text where its mark is, splitting the source paragraph
+    (whose ``w:footnoteReference`` has no text) around it.
+    """
+    notes: list[str] = []
+
+    def pull(elem: pf.Element, _doc: pf.Doc):
+        if isinstance(elem, pf.Note):
+            notes.append(pf.stringify(elem))
+            return []
+        return None
+
+    doc.walk(pull)
+    return pf.stringify(doc) + "".join(notes)
+
+
 def measure_coverage(
     source_text: Sequence[str],
     md_text: str,
@@ -37,7 +55,7 @@ def measure_coverage(
     """Share of source characters (whitespace excluded) still present in the MD read back."""
     scratch = Report(report.input_name, Format.MD)
     parsed = read_md(Source(md_text.encode("utf-8"), "out.md", Format.MD), scratch)
-    output = _squash(pf.stringify(parsed.doc))
+    output = _squash(_text_with_notes_apart(parsed.doc))
     total = found = 0
     missing: list[str] = []
     for paragraph in source_text:

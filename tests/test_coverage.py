@@ -57,6 +57,14 @@ def test_footnote_text_counts():
     assert not missing_events(r)
 
 
+def test_footnote_mark_inside_a_sentence_does_not_split_it():
+    # the source paragraph has no text at the mark (w:footnoteReference), the note text is its own paragraph
+    r = make_report()
+    md = "앞 글에 각주[^1]가 있는 문장.\n\n[^1]: 각주 내용입니다\n"
+    assert measure_coverage(["앞 글에 각주가 있는 문장.", "각주 내용입니다"], md, r) == 1.0
+    assert not missing_events(r)
+
+
 def test_empty_source_is_full():
     r = make_report()
     assert measure_coverage([], "무엇이든\n", r) == 1.0
