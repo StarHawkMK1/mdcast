@@ -20,11 +20,12 @@ def _squash(text: str) -> str:
 
 
 def _forms(text: str, prefixes: Sequence[re.Pattern[str]]) -> list[str]:
-    forms = [text, strip_leading_marker(text)]
+    lead = text.lstrip()  # a paragraph may start with spaces before its hand-typed marker
+    forms = [text, strip_leading_marker(lead)]
     for pattern in prefixes:
-        m = pattern.match(text)
+        m = pattern.match(lead)
         if m:
-            forms.append(text[m.end():])
+            forms.append(lead[m.end():])
     return [f for f in (_squash(f) for f in forms) if f]
 
 

@@ -42,6 +42,14 @@ def test_numbered_heading_kept_and_list_marker_dropped():
     assert not missing_events(r)
 
 
+def test_marker_after_leading_spaces_is_dropped():
+    r = make_report()
+    src = ["   - 들여 쓴 항목", "  2) 들여 쓴 번호"]
+    md = "- 들여 쓴 항목\n\n2. 들여 쓴 번호\n"
+    assert measure_coverage(src, md, r) == 1.0
+    assert not missing_events(r)
+
+
 def test_prefix_patterns_strip_only_at_start():
     r = make_report()
     prefix = re.compile(r"^그림\s*\d+\.\s*")
