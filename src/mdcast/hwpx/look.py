@@ -57,6 +57,39 @@ class PageSetup:
 
 
 @dataclass(frozen=True)
+class Border:
+    width: float = 0.5  # pt
+    color: str = "#000000"
+
+
+@dataclass(frozen=True)
+class TableLook:
+    """One table kind (spec 2026-10-20 §4.4); header bold/alignment come from the tables filter."""
+
+    width: str = "full"  # full | auto
+    font_size: float | None = None  # pt; None: the body size
+    line_height: float | None = None  # ratio
+    padding: float = 1.5  # mm, every side of every cell
+    border: Border = Border(0.5)
+    border_outer: Border = Border(1.0)
+    header_background: str | None = None
+    header_valign: str = "middle"  # top | middle | bottom
+    header_repeat: bool = True
+    body_valign: str = "middle"
+    zebra: str | None = None
+    first_column_background: str | None = None
+
+
+@dataclass(frozen=True)
+class Image:
+    data: bytes
+    ext: str  # png | jpg | gif | bmp | svg
+    width_px: int
+    height_px: int
+    dpi: float = 96.0
+
+
+@dataclass(frozen=True)
 class Metadata:
     title: str = ""
     author: str = ""
@@ -100,3 +133,8 @@ class Settings:
     table_caption_above: bool = True
     figure_caption_above: bool = False
     metadata: Metadata = field(default_factory=Metadata)
+    tables: dict[str | None, TableLook] = field(default_factory=lambda: {None: TableLook()})
+    images: dict[str, Image] = field(default_factory=dict)  # image url -> picture
+    figure_max_ratio: float | None = 1.0  # of the available width (figures.max_width as %)
+    figure_max_mm: float | None = None  # figures.max_width as a length
+    figure_align: str = "center"

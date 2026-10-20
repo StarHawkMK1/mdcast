@@ -1,12 +1,12 @@
 from helpers import HWPX_NS as NS
 from helpers import build, builtin_hwpx, hwpx_integrity, write_template
 
-from mdcast import pipeline
+from mdcast import hwpx, pipeline
 from mdcast.hwpx import Package
 from mdcast.report import Codes, Level
 from mdcast.templates import validate_template
 from mdcast.types import Format, Options, Source
-from mdcast.writers.hwpx import write_hwpx
+from mdcast.writers.hwpx import _settings, write_hwpx
 
 
 def render(tmp_path, md, template=None):
@@ -121,3 +121,29 @@ def test_odd_custom_container_falls_back(tmp_path):
     parts, ctx = render(tmp_path, "```\n코드\n```\n", str(tpl))
     assert body_para(parts, "코드") is not None
     assert Codes.TEMPLATE_INVALID in [e.code for e in ctx.report.events]
+
+
+def test_table_looks_come_from_the_full_config(tmp_path):
+    _, ctx = build(tmp_path, "| a |\n|---|\n| 1 |\n", Format.HWPX)
+    settings = _settings(ctx, custom=False)
+    look = settings.tables[None]
+    assert look == hwpx.TableLook(width="full", font_size=10.0, line_height=1.3, padding=1.5,
+                                  border=hwpx.Border(0.5, "#000000"), border_outer=hwpx.Border(1.0, "#000000"),
+                                  header_background="#F2F2F2", header_valign="middle", header_repeat=True,
+                                  body_valign="middle", zebra=None, first_column_background=None)
+    assert settings.figure_max_ratio == 1.0 and settings.figure_max_mm is None
+    assert settings.figure_align == "center"
+
+
+def test_custom_container_still_gets_variant_table_looks(tmp_path):
+    template = write_template(tmp_path, "t", """
+        name: t
+        tables: {variants: {제출양식: {border: {width: 0.34pt}, border_outer: {width: 0.34pt}, header: {background: "#E5E5E5"}}}}
+        figures: {max_width: 120mm}
+    """, {"reference.hwpx": builtin_hwpx()})
+    _, ctx = build(tmp_path, "본문\n", Format.HWPX, template=str(template))
+    settings = _settings(ctx, custom=True)
+    assert settings.tables["제출양식"].border == hwpx.Border(0.34, "#000000")
+    assert settings.tables["제출양식"].header_background == "#E5E5E5"
+    assert settings.tables[None].border_outer == hwpx.Border(1.0, "#000000")
+    assert settings.figure_max_ratio is None and settings.figure_max_mm == 120.0

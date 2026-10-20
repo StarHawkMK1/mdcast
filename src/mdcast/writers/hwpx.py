@@ -10,6 +10,7 @@ import panflute as pf
 from mdcast import hwpx
 from mdcast.counters import format_counter
 from mdcast.fields import PageField, ResolvedFields
+from mdcast.filters.tables import table_settings
 from mdcast.report import Codes
 from mdcast.units import normalize_color, page_size_mm, parse_length_mm, parse_pt, parse_ratio
 from mdcast.writers.context import RenderError, WriterContext
@@ -90,6 +91,50 @@ def _page(page: dict[str, Any]) -> hwpx.PageSetup:
     )
 
 
+def _border(values: dict[str, Any] | None, default: hwpx.Border) -> hwpx.Border:
+    values = values or {}
+    width = values.get("width")
+    return hwpx.Border(
+        default.width if width is None else parse_pt(width),
+        _color(values.get("color")) or default.color,
+    )
+
+
+def _table_look(values: dict[str, Any]) -> hwpx.TableLook:
+    """One table kind from ``table_settings(config, variant)`` (spec 2026-10-20 §4.4)."""
+    default = hwpx.TableLook()
+    header, body = values.get("header") or {}, values.get("body") or {}
+    first = values.get("first_column") or {}
+
+    def get(source: dict[str, Any], key: str, convert, fallback):
+        value = source.get(key)
+        return fallback if value is None else convert(value)
+
+    return hwpx.TableLook(
+        width=str(values.get("width") or default.width),
+        font_size=get(values, "font_size", parse_pt, None),
+        line_height=get(values, "line_height", parse_ratio, None),
+        padding=get(values, "cell_padding", parse_length_mm, default.padding),
+        border=_border(values.get("border"), default.border),
+        border_outer=_border(values.get("border_outer"), default.border_outer),
+        header_background=_color(header.get("background")),
+        header_valign=str(header.get("valign") or default.header_valign),
+        header_repeat=bool(get(header, "repeat", bool, default.header_repeat)),
+        body_valign=str(body.get("valign") or default.body_valign),
+        zebra=_color(body.get("zebra")),
+        first_column_background=_color(first.get("background")),
+    )
+
+
+def _figure_limit(value: Any) -> tuple[float | None, float | None]:
+    """``figures.max_width`` as (ratio of the available width, length in mm); one of them is set."""
+    if value is None:
+        return 1.0, None
+    if str(value).strip().endswith("%"):
+        return parse_ratio(value), None
+    return None, parse_length_mm(value)
+
+
 def _settings(ctx: WriterContext, custom: bool) -> hwpx.Settings:
     config = ctx.template.config
     values = ctx.template.explicit if custom else config
@@ -121,6 +166,13 @@ def _settings(ctx: WriterContext, custom: bool) -> hwpx.Settings:
         return bullets[min(level, len(bullets)) - 1]
 
     body = config["elements"]["body"]
+    # hwpx has no container table style to keep: the full config applies, custom container or not
+    tables = {
+        variant: _table_look(table_settings(config, variant))
+        for variant in [None, *(config["tables"].get("variants") or {})]
+    }
+    figures = config["figures"]
+    max_ratio, max_mm = _figure_limit(figures.get("max_width"))
     return hwpx.Settings(
         looks=looks,
         styles=styles,
@@ -141,6 +193,10 @@ def _settings(ctx: WriterContext, custom: bool) -> hwpx.Settings:
             created=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             extra=tuple(generator_values(ctx.generator).items()),
         ),
+        tables=tables,
+        figure_max_ratio=max_ratio,
+        figure_max_mm=max_mm,
+        figure_align=str(figures.get("align") or "center"),
     )
 
 

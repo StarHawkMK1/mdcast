@@ -7,6 +7,8 @@ from mdcast.hwpx.container import ContainerError, Package
 from mdcast.hwpx.header import Header
 from mdcast.hwpx.look import (
     ELEMENTS,
+    Border,
+    Image,
     Look,
     Metadata,
     Notice,
@@ -15,13 +17,16 @@ from mdcast.hwpx.look import (
     Piece,
     Settings,
     Slots,
+    TableLook,
 )
 from mdcast.hwpx.writer import write
 
 __all__ = [
     "ELEMENTS",
+    "Border",
     "ContainerError",
     "Header",
+    "Image",
     "Look",
     "Metadata",
     "Notice",
@@ -31,5 +36,6 @@ __all__ = [
     "Piece",
     "Settings",
     "Slots",
+    "TableLook",
     "write",
 ]
