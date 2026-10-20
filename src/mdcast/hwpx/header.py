@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from lxml import etree
 
 from mdcast.hwpx.container import ContainerError
+from mdcast.hwpx.look import Border
 from mdcast.hwpx.units import hwpunit, hwpunit_pt, para_unit, para_unit_pt
 
 HH = "http://www.hancom.co.kr/hwpml/2011/head"
@@ -26,7 +27,17 @@ TYPE_INFO = {
     },
 }
 LINE_WIDTH = "0.12 mm"  # border width seen working in Hangul (appendix A-6)
+# the only border widths Hangul keeps as written, in mm (spec 2026-10-20 appendix B-4)
+LINE_WIDTHS = (0.1, 0.12, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0)
 OFFSETS = ("offsetLeft", "offsetRight", "offsetTop", "offsetBottom")
+SIDES = ("leftBorder", "rightBorder", "topBorder", "bottomBorder")
+
+
+def line_width(pt: float) -> str:
+    """The nearest Hangul border width to ``pt``; a tie takes the thicker one."""
+    mm = pt * 25.4 / 72
+    value = min(reversed(LINE_WIDTHS), key=lambda width: abs(width - mm))
+    return f"{value:.1f} mm" if value >= 1 else f"{value:g} mm"
 
 
 def hh(tag: str) -> str:
@@ -242,6 +253,26 @@ class Header:
         brush = etree.SubElement(element, hc("fillBrush"))
         etree.SubElement(brush, hc("winBrush"), faceColor=fill.upper() if fill else "none",
                          hatchColor="#999999", alpha="0")
+        return self._add("borderFills", element)
+
+    def add_cell_border_fill(self, sides: tuple[Border | None, Border | None, Border | None, Border | None],
+                             fill: str | None) -> str:
+        """A table cell's border fill: left, right, top, bottom (``None``: no line) and background."""
+        element = etree.Element(
+            hh("borderFill"), threeD="0", shadow="0", centerLine="NONE", breakCellSeparateLine="0"
+        )
+        for name in ("slash", "backSlash"):
+            etree.SubElement(element, hh(name), type="NONE", Crooked="0", isCounter="0")
+        for name, side in zip(SIDES, sides):
+            if side is None:
+                etree.SubElement(element, hh(name), type="NONE", width="0.1 mm", color="#000000")
+            else:
+                etree.SubElement(element, hh(name), type="SOLID", width=line_width(side.width),
+                                 color=side.color.upper())
+        etree.SubElement(element, hh("diagonal"), type="SOLID", width="0.1 mm", color="#000000")
+        if fill:
+            brush = etree.SubElement(element, hc("fillBrush"))
+            etree.SubElement(brush, hc("winBrush"), faceColor=fill.upper(), hatchColor="#999999", alpha="0")
         return self._add("borderFills", element)
 
     def add_tabs(self, stops: list[tuple[float, str]]) -> str:

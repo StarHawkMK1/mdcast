@@ -1,11 +1,13 @@
 import copy
 
+import pytest
 from helpers import HWPX_NS as NS
 from helpers import builtin_hwpx, hwpx_integrity
 from lxml import etree
 
 from mdcast.hwpx.container import Package
-from mdcast.hwpx.header import CharSpec, Header, ParaSpec
+from mdcast.hwpx.header import HC, CharSpec, Header, ParaSpec, line_width
+from mdcast.hwpx.look import Border
 from mdcast.hwpx.units import hwpunit, para_unit
 
 HH = f"{{{NS['hh']}}}"
@@ -141,3 +143,24 @@ def test_package_stays_sound_after_edits():
     h.add_para("0", ParaSpec(border_fill=h.add_border_fill(fill="#EEEEEE"), tab_pr=h.add_tabs([(10, "LEFT")])))
     package.set_xml("Contents/header.xml", h.root)
     hwpx_integrity(package.write())
+
+
+@pytest.mark.parametrize("pt, expected", [(0.34, "0.12 mm"), (0.5, "0.2 mm"), (1.0, "0.4 mm"),
+                                          (0.1, "0.1 mm"), (3.0, "1.0 mm"), (100.0, "5.0 mm")])
+def test_line_width_snaps_to_hangul_widths(pt, expected):
+    assert line_width(pt) == expected
+
+
+def test_cell_border_fill_sides_and_background():
+    head = header()
+    outer, inner = Border(1.0, "#000000"), Border(0.5, "#333333")
+    fill_id = head.add_cell_border_fill((outer, inner, outer, None), "#f2f2f2")
+    fill = head.item("borderFills", fill_id)
+    sides = [(e.get("type"), e.get("width"), e.get("color")) for e in fill
+             if e.tag.endswith(("leftBorder", "rightBorder", "topBorder", "bottomBorder"))]
+    assert sides == [("SOLID", "0.4 mm", "#000000"), ("SOLID", "0.2 mm", "#333333"),
+                     ("SOLID", "0.4 mm", "#000000"), ("NONE", "0.1 mm", "#000000")]
+    assert fill.find(f".//{{{HC}}}winBrush").get("faceColor") == "#F2F2F2"
+    assert head.add_cell_border_fill((outer, inner, outer, None), "#f2f2f2") == fill_id
+    bare = head.item("borderFills", head.add_cell_border_fill((None,) * 4, None))
+    assert bare.find(f"{{{HC}}}fillBrush") is None
