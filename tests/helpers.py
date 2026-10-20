@@ -56,6 +56,14 @@ def tiny_bmp() -> bytes:
     return buffer.getvalue()
 
 
+def tiny_webp() -> bytes:
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (2, 2), (30, 200, 30)).save(buffer, format="WEBP")
+    return buffer.getvalue()
+
+
 def build(tmp_path: Path, md: str, target: Format, template: str | None = None, *, offline: bool = True):
     report = Report("doc.md", Format.MD)
     source = Source(textwrap.dedent(md).encode("utf-8"), "doc.md", Format.MD, base_dir=tmp_path)

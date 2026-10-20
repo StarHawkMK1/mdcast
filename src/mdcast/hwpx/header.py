@@ -133,6 +133,11 @@ class Header:
         left = self.item("paraProperties", para_id).find(f".//{hh('margin')}/{hc('left')}")
         return 0.0 if left is None else int(left.get("value", "0")) * 25.4 / 14400
 
+    def para_prev(self, para_id: str) -> int:
+        """Space before a paragraph shape in HWPUNIT (its stored value is in doubled units)."""
+        prev = self.item("paraProperties", para_id).find(f".//{hh('margin')}/{hc('prev')}")
+        return 0 if prev is None else int(prev.get("value", "0")) // 2
+
     def _add(self, list_tag: str, element: etree._Element) -> str:
         element.attrib.pop("id", None)
         key = (list_tag, etree.tostring(element))

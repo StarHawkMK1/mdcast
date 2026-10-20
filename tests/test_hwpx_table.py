@@ -84,7 +84,9 @@ def test_table_xml_matches_the_sample_shape():
     t = tbl(paragraphs)
     assert (t.get("rowCnt"), t.get("colCnt"), t.get("repeatHeader"), t.get("pageBreak")) == ("3", "5", "1", "CELL")
     assert [c.tag.split("}")[1] for c in t][:4] == ["sz", "pos", "outMargin", "inMargin"]
-    assert t.find("hp:pos", NS).get("treatAsChar") == "1"
+    pos = t.find("hp:pos", NS)
+    assert (pos.get("treatAsChar"), pos.get("horzRelTo")) == ("0", "PARA")  # Hangul splits only floating tables
+    assert t.find("hp:outMargin", NS).attrib == {"left": "0", "right": "0", "top": "283", "bottom": "283"}
     assert int(t.find("hp:sz", NS).get("width")) == hwpunit(170.0)
     cells = t.findall("hp:tr/hp:tc", NS)
     assert len(cells) == 11  # 15 places in the 3x5 grid, 4 covered by the two spans
@@ -160,3 +162,11 @@ def test_empty_table_writes_only_its_caption():
     t.content[0].content = []
     _, _, paragraphs, _ = hwpx_render("", doc=doc)
     assert hwpx_texts(paragraphs) == ["빈 표"]
+
+
+def test_floating_table_keeps_the_next_paragraphs_space_before():
+    # Hangul lays the next paragraph right under a floating table: its own gap goes to the table's margin
+    _, _, paragraphs, _ = hwpx_render("| a |\n|---|\n| 1 |\n\n## 다음 제목\n\n| b |\n|---|\n| 2 |\n")
+    first, second = [t for p in paragraphs for t in p.iter(f"{{{NS['hp']}}}tbl")]
+    assert first.find("hp:outMargin", NS).get("bottom") == str(283 + 1200)  # heading2 space_before 12pt
+    assert second.find("hp:outMargin", NS).get("bottom") == "283"  # nothing follows

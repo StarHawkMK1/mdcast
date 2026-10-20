@@ -1,0 +1,11 @@
+schema: 1
+name: submission
+version: 1.0.0
+description: 제출 양식처럼 가는 테두리와 회색 머리행을 쓰는 표 종류 예시
+extends: default
+tables:
+  variants:
+    제출양식:
+      border: { width: 0.34pt }
+      border_outer: { width: 0.34pt }
+      header: { background: "#E5E5E5" }

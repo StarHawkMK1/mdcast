@@ -131,7 +131,7 @@ hwpx 표 모양은 docx·pdf 와 같은 템플릿 `tables` 설정을 따른다. 
 
 - `body.head` 행 (pandoc 의 본문 중간 머리행. MD 표 문법으로는 생기지 않는다)과 `table.foot` 행은 본문 행 모양이다. 필터가 머리행 굵게·정렬을 `table.head` 에만 넣으므로 그와 맞춘다.
 - **첫 열은 격자 기준이다.** 위 행의 rowspan 이 덮은 행에서는 `row.content[0]` 이 0열이 아니다. 지금 필터의 `first_column.bold` 는 `row.content[0]` 을 굵게 해서 이런 행에서 엉뚱한 칸을 굵게 한다. M2b 에서 필터를 격자 0열 기준으로 고친다 (docx·pdf 도 같이 고쳐진다. `first_column.bold` 를 켠 표에서 첫 열을 rowspan 으로 묶은 경우에만 결과가 바뀐다). hwpx 의 첫 열 배경도 격자 0열에 칠한다.
-- 표를 담은 문단은 지금 위치의 본문 문단 모양을 쓰고, 표는 글자처럼 취급한다 (`treatAsChar="1"`, 예시 문서와 같음). 표가 쓸 수 있는 폭보다 좁으면 왼쪽에 둔다.
+- 표를 담은 문단은 지금 위치의 본문 문단 모양을 쓴다. 표는 **글자처럼 취급하지 않는다** (`treatAsChar="0"`, `horzRelTo="PARA"`): 글자처럼 취급한 표는 한글이 쪽을 넘겨 나누지 않는다 (B-5 정정, 2026-10-20 구현 중 확인). 표 위·아래 바깥 여백은 1mm(283)이고, 표 바로 다음 문단의 앞 간격을 아래 여백에 더한다 (한글은 떠 있는 표 바로 아래에 다음 문단을 놓아 그 문단의 앞 간격이 사라진다). 표가 쓸 수 있는 폭보다 좁으면 왼쪽에 둔다.
 - **사용자 reference.hwpx 를 쓸 때도 표 모양 설정을 모두 적용한다.** hwpx 에는 docx 의 표 스타일 같은 "그릇이 가진 표 모양"이 없으므로, 템플릿에 쓴 값 + 내장 기본값으로 만든다. docx 는 사용자 그릇의 표 스타일이 이기므로 이 점이 다르다. README 에 적는다.
 
 ### 4.5 칸 내용
@@ -257,9 +257,9 @@ M2a §8.3 에 더한다. 새 픽스처와 kitchen-sink 에 대해:
     textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="CELL" repeatHeader="1"
     rowCnt="R" colCnt="C" cellSpacing="0" borderFillIDRef="<테두리 없는 fill>" noAdjust="0">
   <hp:sz width="<표 폭>" widthRelTo="ABSOLUTE" height="<행 최소 높이 합>" heightRelTo="ABSOLUTE" protect="0"/>
-  <hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0"
+  <hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0"
       vertRelTo="PARA" horzRelTo="PARA" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/>
-  <hp:outMargin left="0" right="0" top="0" bottom="0"/>
+  <hp:outMargin left="0" right="0" top="283" bottom="283 + 다음 문단 앞 간격"/>
   <hp:caption …/>                       <!-- 있을 때만, inMargin 앞 (B-8) -->
   <hp:inMargin left="P" right="P" top="P" bottom="P"/>
   <hp:tr>
@@ -276,7 +276,7 @@ M2a §8.3 에 더한다. 새 픽스처와 kitchen-sink 에 대해:
 ```
 
 - 표는 문단의 run 안에 들어가고 뒤에 빈 `<hp:t/>` 가 온다 (그림도 같다).
-- 한글이 COM 으로 만든 표는 `treatAsChar="0"`, `outMargin` 283 이지만, 사용자 예시 문서처럼 `treatAsChar="1"`, `horzRelTo="PARA"`, `outMargin` 0 으로 써도 본문 폭에 맞게 그려진다.
+- 한글이 COM 으로 만든 표는 `treatAsChar="0"`, `outMargin` 283 이다. 사용자 예시 문서처럼 `treatAsChar="1"` 로 써도 본문 폭에 맞게 그려지지만, **쪽을 넘기는 표가 나뉘지 않는다** (B-5 정정). 구현은 `treatAsChar="0"`, `horzRelTo="PARA"` (목록 들여쓰기를 따름), `outMargin` 위·아래 283 을 쓴다. `outMargin` 아래가 0 이면 다음 문단이 표 아래쪽에 겹친다.
 - `id`·`zOrder`·`instId` 를 모두 0 으로 써도 열렸다. 구현은 문서 안에서 겹치지 않는 번호를 쓴다.
 
 ### B-2 병합
@@ -302,7 +302,9 @@ M2a §8.3 에 더한다. 새 픽스처와 kitchen-sink 에 대해:
 
 ### B-5 머리행·쪽 넘김
 
-`header="1"` 칸 + `repeatHeader="1"` + `pageBreak="CELL"`: 80행 표가 2쪽으로 나뉘고 2쪽 맨 위에 머리행이 다시 나온다. 머리행 배경은 칸 `borderFill` 의 `fillBrush`.
+`header="1"` 칸 + `repeatHeader="1"` + `pageBreak="CELL"` + **`treatAsChar="0"`**: 표가 쪽을 넘겨 나뉘고 다음 쪽 맨 위에 머리행이 다시 나온다. 머리행 배경은 칸 `borderFill` 의 `fillBrush`.
+
+**정정 (2026-10-20 구현 중):** 처음 견본에서는 `treatAsChar="1"` 인 80행 표가 "2쪽으로 나뉘었다"고 적었으나 잘못 읽은 것이었다. 실제로는 표 전체가 2쪽으로 밀리고 쪽 아래에서 잘렸다 (나머지 행이 그려지지 않음). 같은 문서에서 `treatAsChar="0"` 만 바꾸면 마지막 행까지 그려진다. `tests/test_hangul.py::test_long_table_splits_across_pages` 가 한글 PDF 의 마지막 쪽에 마지막 행이 있는지 본다.
 
 ### B-6 칸 안쪽 여백
 

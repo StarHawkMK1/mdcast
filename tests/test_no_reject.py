@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pypdfium2 as pdfium
 import pytest
-from helpers import tiny_bmp, tiny_jpeg, tiny_png
+from helpers import tiny_bmp, tiny_jpeg, tiny_png, tiny_webp
 
 from mdcast import pipeline
 from mdcast.report import Codes, Level
@@ -112,6 +112,12 @@ CONTENT_CASES = {
         Codes.IMAGE_FETCH_FAILED,
         ["[이미지: 그림 설명]", "그림 참조"],
     ),
+    "merged-and-ragged-tables": (
+        "+---+---+\n| a | b |\n+   +---+\n|   | c |\n+---+---+\n\n| a | b | c |\n|---|---|---|\n| 1 |\n",
+        {}, None, ["a", "c"]),
+    "webp-image": (_images_md("pic.webp"), {"pic.webp": tiny_webp()}, None, ["앞 문단", "뒤 문단"]),
+    "note-in-note-and-cell": (
+        "가[^1]\n\n| 칸[^2] |\n|---|\n| x |\n\n[^1]: 바깥 각주\n[^2]: 칸 각주\n", {}, None, ["가", "칸"]),
     "linked-inline-missing-image": (
         "앞 문단 ![설명](none.png){#img-a} 뒤\n\n[참조](#img-a)\n",
         {},

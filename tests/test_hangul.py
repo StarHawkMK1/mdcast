@@ -6,6 +6,7 @@ Without the security module registered (README), Hangul asks to allow file acces
 import re
 from pathlib import Path
 
+import pypdfium2 as pdfium
 import pytest
 from helpers import char_origin, line_pitch, line_starts
 
@@ -32,8 +33,8 @@ def hangul():
     hwp.Quit()
 
 
-def convert(tmp_path: Path, md: str, name: str = "doc") -> tuple[Path, bytes]:
-    source = Source(md.encode("utf-8"), f"{name}.md", Format.MD, base_dir=tmp_path)
+def convert(tmp_path: Path, md: str, name: str = "doc", base_dir: Path | None = None) -> tuple[Path, bytes]:
+    source = Source(md.encode("utf-8"), f"{name}.md", Format.MD, base_dir=base_dir or tmp_path)
     result = pipeline.convert(source, [Format.HWPX, Format.PDF],
                               options=Options(offline=True, cwd=tmp_path, home=tmp_path / "home"))
     outputs = {o.format: o.data for o in result.outputs}
@@ -51,10 +52,10 @@ def through_hangul(hwp, path: Path) -> tuple[str, bytes]:
     return text, pdf.read_bytes()
 
 
-@pytest.mark.parametrize("name", ["kitchen-sink", "edge-cases", "korean-report"])
+@pytest.mark.parametrize("name", ["kitchen-sink", "edge-cases", "korean-report", "tables-images"])
 def test_hangul_opens_fixture(hangul, tmp_path, name):
     md = (FIXTURES / f"{name}.md").read_text(encoding="utf-8")
-    path, _ = convert(tmp_path, md, name)
+    path, _ = convert(tmp_path, md, name, base_dir=FIXTURES)
     text, pdf = through_hangul(hangul, path)
     body = re.sub(r"\A---\n.*?\n---\n", "", md, flags=re.DOTALL)  # front matter is not body text
     words = re.findall(r"[가-힣]{2,}", body)
@@ -93,3 +94,40 @@ def test_header_footer_and_first_line_positions(hangul, tmp_path):
     expected = -((1.8 - 1) / 2 - 0.05) * 11 * 25.4 / 72
     shift = char_origin(hangul_pdf, "본문첫줄")[1] - char_origin(mdcast_pdf, "본문첫줄")[1]
     assert shift == pytest.approx(expected, abs=0.5)
+
+
+def top_controls(hwp) -> list[str]:
+    ids, ctrl = [], hwp.HeadCtrl
+    while ctrl is not None:
+        ids.append(ctrl.CtrlID)
+        ctrl = ctrl.Next
+    return ids
+
+
+def test_tables_pictures_footnotes_open_as_objects(hangul, tmp_path):
+    md = (FIXTURES / "tables-images.md").read_text(encoding="utf-8")
+    path, _ = convert(tmp_path, md, "tables-images", base_dir=FIXTURES)
+    assert hangul.Open(str(path.resolve()), "HWPX", "")
+    ids = top_controls(hangul)
+    text = hangul.GetTextFile("UNICODE", "")
+    pages = hangul.PageCount
+    hangul.Clear(1)
+    # Hangul lists every control, those inside table cells too
+    assert ids.count("tbl") == 4
+    assert ids.count("gso") == 5  # inline icon, wide figure, 40% figure, two cell pictures
+    assert ids.count("fn") == 3  # two body notes and the cell note
+    for needle in ("성능 기준", "로그인 화면", "첫 각주 내용", "칸 안 각주", "항목 60"):
+        assert needle in text
+    assert pages >= 2
+
+
+def test_long_table_splits_across_pages(hangul, tmp_path):
+    """The last row must be laid out, not cut at the page bottom (a table treated as a character never splits)."""
+    rows = "".join(f"| {n} | 항목 {n} |\n" for n in range(1, 81))
+    path, _ = convert(tmp_path, f"# 긴 표\n\n앞 문단\n\n| 번호 | 항목 |\n|---|---|\n{rows}\n뒤 문단\n")
+    _, pdf = through_hangul(hangul, path)
+    document = pdfium.PdfDocument(pdf)
+    pages = [document[i].get_textpage().get_text_range() for i in range(len(document))]
+    assert len(pages) >= 2
+    assert "항목 80" in pages[-1] and "뒤 문단" in pages[-1]
+    assert "번호" in pages[-1]  # the header row repeats on the next page

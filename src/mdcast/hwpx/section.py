@@ -34,8 +34,11 @@ _CONTROL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f￾￿]")  # not allowed i
 _GAP_EM = 0.5  # between a list marker and its text, as the docx writer
 _MIN_HANGING_MM = 3.0
 _MIN_WIDTH_MM = 10.0  # narrowest room offered to a table or picture
-_OBJECT_POS = {  # tables and pictures sit in the text like a character (appendix B-1, B-9)
-    "treatAsChar": "1", "affectLSpacing": "0", "flowWithText": "1", "allowOverlap": "0", "holdAnchorAndSO": "0",
+# A table floats with its paragraph: Hangul never splits a table treated as a character across
+# pages, it pushes it whole to the next page and cuts it there (appendix B-5). PARA keeps list indents.
+TABLE_MARGIN = 283  # HWPUNIT (1mm), Hangul's own space above and below a table
+_TABLE_POS = {
+    "treatAsChar": "0", "affectLSpacing": "0", "flowWithText": "1", "allowOverlap": "0", "holdAnchorAndSO": "0",
     "vertRelTo": "PARA", "horzRelTo": "PARA", "vertAlign": "TOP", "horzAlign": "LEFT", "vertOffset": "0",
     "horzOffset": "0",
 }
@@ -186,7 +189,18 @@ class SectionWriter:
             index += 1
         if not self.paragraphs:
             self.paragraph("body", Context(width=self.width))
-        return [p.finish() for p in self.paragraphs]
+        return self._finish(self.paragraphs)
+
+    def _finish(self, paragraphs: list[Paragraph]) -> list[etree._Element]:
+        """The paragraph elements; a floating table takes the next paragraph's space before as its own
+        bottom margin, since Hangul lays that paragraph right under the table."""
+        elements = [p.finish() for p in paragraphs]
+        for element, following in itertools.pairwise(elements):
+            gap = self.header.para_prev(following.get("paraPrIDRef"))
+            for table in element.findall(f"{hp('run')}/{hp('tbl')}"):
+                margin = table.find(hp("outMargin"))
+                margin.set("bottom", str(TABLE_MARGIN + gap))
+        return elements
 
     @contextmanager
     def _collect(self):
@@ -340,8 +354,10 @@ class SectionWriter:
         )
         etree.SubElement(element, hp("sz"), width=str(total), widthRelTo="ABSOLUTE",
                          height=str(row_height * len(grid.rows)), heightRelTo="ABSOLUTE", protect="0")
-        etree.SubElement(element, hp("pos"), **_OBJECT_POS)
-        etree.SubElement(element, hp("outMargin"), left="0", right="0", top="0", bottom="0")
+        etree.SubElement(element, hp("pos"), **_TABLE_POS)
+        # Hangul's 1mm above and below: without it the next paragraph runs into a floating table
+        etree.SubElement(element, hp("outMargin"), left="0", right="0", top=str(TABLE_MARGIN),
+                         bottom=str(TABLE_MARGIN))
         if caption:
             element.append(self.caption_element(caption, total, self.settings.table_caption_above))
         margins = {"left": str(pad), "right": str(pad), "top": str(pad), "bottom": str(pad)}
@@ -386,7 +402,7 @@ class SectionWriter:
                     self.paragraph("body", cell_ctx)
         finally:
             self.shapes = outer
-        return [p.finish() for p in paragraphs]
+        return self._finish(paragraphs)
 
     def caption_element(self, blocks: list[pf.Element], width: int, above: bool) -> etree._Element:
         """Hangul's caption on a table or picture, without Hangul's own number (appendix B-8)."""
@@ -475,7 +491,7 @@ class SectionWriter:
             self.blocks(rest, ctx)
         note = etree.SubElement(paragraph.control(char), hp("footNote"), number=number, suffixChar="41",
                                 instId=str(next(self._objects)))
-        note.append(sub_list([p.finish() for p in paragraphs], "TOP"))
+        note.append(sub_list(self._finish(paragraphs), "TOP"))
 
     # inlines ------------------------------------------------------------------------------
 
