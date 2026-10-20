@@ -61,8 +61,8 @@ M2a 와 같다. 한글 COM 으로 기능을 하나씩 넣은 문서를 hwpx 로 
 | B-8 | 한글 캡션을 단 표·그림 (위·아래) | `hp:caption` 표현, 자동 번호 없이 글자만 넣을 수 있는지, 캡션이 개체와 같은 쪽에 붙는지 |
 | B-9 | 그림 (PNG 하나) | `hp:pic` 전체, BinData 이름·압축, manifest 항목, `orgSz`·`curSz`·`imgDim` 과 픽셀·DPI 의 관계 |
 | B-10 | 칸 안 그림 | 예시 문서와 같은 배치가 그대로 되는지 |
-| B-11 | 이미지 형식 PNG·JPEG·GIF·BMP·WebP·SVG | 한글 2020 이 각각을 보여 주는지 (보여 주지 못하는 형식은 §5.1 대로 자리표시) |
-| B-12 | 각주 | `hp:footNote` 표현, 번호(`autoNum`), 각주 안 여러 문단·목록, 칸 안 각주, 각주 안 각주가 되는지, 스타일 "각주", `footNotePr` |
+| B-11 | 이미지 형식 PNG·JPEG·GIF·BMP·WebP·SVG | 한글 2020 이 각각을 보여 주는지 (보여 주지 못하는 형식은 §5.1 대로 PNG 로 바꾼다) |
+| B-12 | 각주 | `hp:footNote` 표현, 번호(`autoNum`), 각주 안 여러 문단·목록, 각주 안 표·그림, 칸 안 각주, 각주 안 각주가 되는지, 스타일 "각주", `footNotePr` |
 | B-13 | 칸 안 표 (중첩) | 중첩 표의 표현과 폭 |
 | B-14 | 같은 그림을 두 번 넣은 문서 | BinData 를 하나만 두고 두 번 참조해도 되는지 |
 
@@ -80,7 +80,7 @@ M2a §4 의 경계를 지킨다: `src/mdcast/hwpx/` 는 mdcast 의 다른 모듈
 - `Settings` 에 더할 것:
   - `tables: dict[str | None, TableLook]`: 표 종류 이름 → 모양 (`None` 은 기본).
   - `images: dict[str, Image]`: 이미지 주소 → 그림. 여기 없는 주소는 어댑터가 이미 자리표시로 바꿔 둔 것이다 (§5.1).
-  - `figure_max_width` (본문 폭에 대한 비율, `figures.max_width`), `figure_align` (`figures.align`).
+  - `figure_max_ratio` 와 `figure_max_mm` (`figures.max_width` 가 `%` 면 비율, `mm` 같은 길이면 길이. 둘 중 하나만 채운다), `figure_align` (`figures.align`).
 
 ### 3.2 표 종류를 표마다 전달
 
@@ -127,7 +127,8 @@ hwpx 표 모양은 docx·pdf 와 같은 템플릿 `tables` 설정을 따른다. 
 | `cell_padding` | 칸 안쪽 여백 네 변 (B-6 의 결과대로 `inMargin` 또는 `cellMargin`) |
 | `font_size`, `line_height` | 칸 문단의 글자 크기와 줄 간격. 칸 문단의 앞뒤 간격은 0 (docx 내장 그릇과 같음) |
 
-- `body.head` 행 (pandoc 의 본문 중간 머리행)은 머리행 모양으로 쓰되 반복하지 않는다. `table.foot` 행은 본문 행 모양이다.
+- `body.head` 행 (pandoc 의 본문 중간 머리행. MD 표 문법으로는 생기지 않는다)과 `table.foot` 행은 본문 행 모양이다. 필터가 머리행 굵게·정렬을 `table.head` 에만 넣으므로 그와 맞춘다.
+- **첫 열은 격자 기준이다.** 위 행의 rowspan 이 덮은 행에서는 `row.content[0]` 이 0열이 아니다. 지금 필터의 `first_column.bold` 는 `row.content[0]` 을 굵게 해서 이런 행에서 엉뚱한 칸을 굵게 한다. M2b 에서 필터를 격자 0열 기준으로 고친다 (docx·pdf 도 같이 고쳐진다. `first_column.bold` 를 켠 표에서 첫 열을 rowspan 으로 묶은 경우에만 결과가 바뀐다). hwpx 의 첫 열 배경도 격자 0열에 칠한다.
 - 표를 담은 문단은 지금 위치의 본문 문단 모양을 쓰고, 표는 글자처럼 취급한다 (`treatAsChar="1"`, 예시 문서와 같음). 표가 쓸 수 있는 폭보다 좁으면 왼쪽에 둔다.
 - **사용자 reference.hwpx 를 쓸 때도 표 모양 설정을 모두 적용한다.** hwpx 에는 docx 의 표 스타일 같은 "그릇이 가진 표 모양"이 없으므로, 템플릿에 쓴 값 + 내장 기본값으로 만든다. docx 는 사용자 그릇의 표 스타일이 이기므로 이 점이 다르다. README 에 적는다.
 
@@ -152,15 +153,17 @@ hwpx 표 모양은 docx·pdf 와 같은 템플릿 `tables` 설정을 따른다. 
 ### 5.1 읽기
 
 - 어댑터가 문서의 이미지를 docx·pdf 와 같은 규칙으로 읽는다: `writers/images.py` 의 로컬·원격 읽기, `--offline`, 시간 제한, 20MB 상한. 읽은 바이트는 `settings.images` 로 넘긴다. 파일로 쓸지(`localize_images` 재사용) 메모리로만 들고 있을지는 구현자가 정한다.
-- 한글이 보여 주지 못하는 형식(B-11 결과)이나 손상된 그림은 docx·pdf 와 같이 `[이미지: 설명]` 자리표시로 바꾸고 `IMAGE_FETCH_FAILED` 를 알린다. 그림을 잃은 그림 블록은 캡션 글자를 남긴 문단이 된다 (기존 `localize_images` 동작과 같음).
+- 형식은 바이트로 판별한다. 지금 `_extension()` 에는 BMP 판별이 없으므로 더한다 (PDF 의 strict 허용 목록과 오류 문구는 그대로 둔다). hwpx 허용 목록은 B-11 결과로 정한다.
+- 한글이 보여 주지 못하는 형식(B-11 결과. WebP·SVG 가 해당할 수 있다)은 **PNG 로 바꿔 넣는다.** 바꾸는 데는 이미 실행 의존성인 typst 를 쓴다 (그림 하나만 든 쪽을 그림 크기로 만들어 PNG 로 내보낸다. 해상도는 구현자가 정하되 화면에서 흐리지 않게). M4 의 다이어그램이 SVG 로 나올 것이므로, 자리표시로 두면 hwpx 에서만 그림이 사라진다.
+- 읽지 못하거나 손상되었거나 PNG 로 바꾸지 못한 그림은 docx·pdf 와 같이 `[이미지: 설명]` 자리표시로 바꾸고 `IMAGE_FETCH_FAILED` 를 알린다. 그림을 잃은 그림 블록은 캡션 글자를 남긴 문단이 된다 (기존 `localize_images` 동작과 같음).
 - M2a 의 "이미지는 M2b 에서 지원" 알림은 없앤다.
-- 픽셀 크기와 DPI 는 PNG(`IHDR`, `pHYs`)·JPEG(SOF, JFIF 밀도)·GIF·BMP 머리에서 읽는다. 실행 의존성에 Pillow 가 없으므로 직접 읽는다 (어댑터 쪽 `writers/images.py`). DPI 정보가 없으면 96 으로 본다. 크기를 읽지 못한 그림은 자리표시로 바꾼다.
+- 픽셀 크기와 DPI 는 PNG(`IHDR`, `pHYs`)·JPEG(SOF, JFIF 밀도)·GIF·BMP 머리에서 읽는다. 실행 의존성에 Pillow 가 없으므로 직접 읽는다 (어댑터 쪽 `writers/images.py`). DPI 정보가 없으면 96 으로 본다. PNG 로 바꾼 그림은 바꾼 결과에서 읽는다. 크기를 읽지 못한 그림은 자리표시로 바꾼다.
 
 ### 5.2 크기
 
 1. 원래 크기 = 픽셀 ÷ DPI.
 2. pandoc 크기 속성 (`width`·`height`: `%`, `mm`, `cm`, `in`, `px`, 단위 없는 값은 px)이 있으면 그것을 쓴다. `%` 는 쓸 수 있는 폭에 대한 비율이다. 하나만 있으면 가로세로 비율을 지킨다.
-3. 폭이 `figure_max_width × 쓸 수 있는 폭` 을 넘으면 비율을 지켜 줄인다. 이 상한은 인라인 이미지에도 적용한다 (쪽 밖으로 나가지 않게).
+3. 상한 = `figures.max_width` 가 비율이면 비율 × 쓸 수 있는 폭, 길이면 그 길이와 쓸 수 있는 폭 중 작은 값. 폭이 상한을 넘으면 비율을 지켜 줄인다. 이 상한은 인라인 이미지에도 적용한다 (쪽 밖으로 나가지 않게).
 4. 쓸 수 있는 폭은 §4.2 와 같다 (칸 안이면 칸 안쪽 폭).
 
 ### 5.3 배치
@@ -180,7 +183,8 @@ hwpx 표 모양은 docx·pdf 와 같은 템플릿 `tables` 설정을 따른다. 
 - pandoc `Note` 를 한글 각주 개체로 만든다. 번호는 한글이 매기고, 번호 모양·구분선·위치는 그릇의 `footNotePr` 를 따른다 (내장 그릇은 한글 기본값).
 - 각주 내용의 블록은 SectionWriter 로 만든 문단이 각주 안에 들어간다. 모양은 `footnote` 요소의 모양과 스타일(기본 "각주")이다. 목록·코드도 같은 규칙.
 - 칸 안 각주는 B-12 에서 한글이 받으면 각주로 만든다.
-- 한글이 각주를 담지 못하는 자리(각주 안 각주 등, B-12)에서는 거부하지 않는다. 그 각주만 M2a 방식으로 낮춘다: 본문에 `[n]`, 문서 끝에 내용 문단. 처음 한 번 `RENDER_WARNING` 으로 알린다.
+- 각주 안의 표·그림도 B-12 에서 한글이 받으면 개체로 만들고, 받지 않으면 표는 M2a 방식(행마다 문단), 그림은 자리표시로 낮추고 알린다. (각주 안 표는 docx 용 표 기록에서 빠진다(`_in_footnote`). hwpx 는 그 기록을 쓰지 않고 표 속성의 `mdcast-variant` 를 읽으므로 상관없다.)
+- 한글이 각주를 담지 못하는 자리(각주 안 각주 등, B-12)에서는 거부하지 않는다. 그 각주만 M2a 방식으로 낮춘다: 본문에 `[주 n]`, 문서 끝에 `[주 n] 내용` 문단. `n` 은 낮춘 각주끼리 따로 센다 (한글 각주 번호 1, 2, 3 과 겹쳐 보이지 않게 `주` 를 붙인다). 처음 한 번 `RENDER_WARNING` 으로 알린다.
 - M2a 의 "각주는 M2b 에서 지원" 알림은 없앤다.
 
 ## 7. 알림
@@ -197,7 +201,8 @@ hwpx 표 모양은 docx·pdf 와 같은 템플릿 `tables` 설정을 따른다. 
 - 병합 표: `cellAddr`·`cellSpan`, 가려진 칸 생략, `rowCnt`·`colCnt`, 열 너비 합 = 표 폭, 병합 칸 폭 = 덮은 열의 합.
 - 칸별 `borderFill`: 바깥 변 = `border_outer`, 안쪽 변 = `border`. 배경 우선순위. 머리행 `header="1"` 과 `repeatHeader`.
 - 표 종류가 표마다 다른 모양을 쓰는지. 사용자 reference.hwpx 에서도 표 모양이 적용되는지.
-- 그림: BinData 항목·manifest 항목·`binaryItemIDRef` 가 서로 맞는지, 크기 계산(원래 크기, `%`·mm 속성, 최대 폭 상한, 칸 안 상한), 실패 시 자리표시와 `IMAGE_FETCH_FAILED`.
+- 그림: BinData 항목·manifest 항목·`binaryItemIDRef` 가 서로 맞는지, 크기 계산(원래 크기, `%`·mm 속성, 비율·길이 상한, 칸 안 상한), BMP 판별, 한글이 못 보여 주는 형식의 PNG 변환, 실패 시 자리표시와 `IMAGE_FETCH_FAILED`.
+- 필터의 첫 열 굵게가 rowspan 표에서 격자 0열에 들어가는지 (docx·pdf 포함).
 - 각주 XML, 각주 안 목록, 낮춰 쓰는 경우.
 - 모든 XML 이 잘 짜였고, 참조하는 id(`borderFillIDRef`, `paraPrIDRef`, `charPrIDRef`, `binaryItemIDRef`)가 모두 있는지.
 
