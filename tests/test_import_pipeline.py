@@ -93,3 +93,32 @@ def test_large_table_imports_with_few_pandoc_calls(monkeypatch):
     res = convert(Source(data, "a.docx", Format.DOCX), [Format.MD])
     assert len(calls) <= 8  # was one call per cell (300+)
     assert "칸 49-5" in res.outputs[0].data.decode() and res.report.coverage == 1.0
+
+
+def test_imported_odd_asset_folder_exports_again(tmp_path):
+    import io
+
+    from docx_builder import docx_bytes
+    from helpers import tiny_png
+
+    data = docx_bytes(lambda d: d.add_picture(io.BytesIO(tiny_png())))
+    res = convert(Source(data, "붙임1)50%20 계획.docx", Format.DOCX), [Format.MD])
+    out = res.outputs[0]
+    for name, blob in out.assets.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_bytes(blob)
+    assert "붙임1%2950%2520%20계획_assets/" in out.data.decode()
+    back = convert(Source(out.data, "붙임.md", Format.MD, base_dir=tmp_path), [Format.DOCX])
+    assert back.outputs[0].data is not None
+    assert not [e for e in back.report.events if e.code == Codes.IMAGE_FETCH_FAILED]
+
+
+def test_hand_written_encoded_image_paths_still_export(tmp_path):
+    from helpers import tiny_png
+
+    for name in ("my pic.png", "50%.png", "a(1).png"):
+        (tmp_path / name).write_bytes(tiny_png())
+    md = "![a](my%20pic.png)\n\n![b](50%25.png)\n\n![c](50%.png)\n\n![d](a(1).png)\n\n![e](a%281%29.png)\n"
+    res = convert(Source(md.encode(), "a.md", Format.MD, base_dir=tmp_path), [Format.DOCX])
+    assert res.outputs[0].data is not None
+    assert not [e for e in res.report.events if e.code == Codes.IMAGE_FETCH_FAILED]

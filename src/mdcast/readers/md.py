@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import urllib.parse
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
@@ -138,11 +139,15 @@ _SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]+:")
 
 
 def _decode_image_paths(doc: pf.Doc) -> pf.Doc:
-    """pandoc percent-encodes spaces in link destinations; local image paths must keep them."""
+    """A local image path is a file name: percent-decoded once here (``a%20b`` → ``a b``).
+
+    pandoc percent-encodes spaces and ``<>`` in link destinations, and write_md encodes what
+    would break the link. URLs with a scheme keep their encoding.
+    """
 
     def action(elem: pf.Element, _doc: pf.Doc):
-        if isinstance(elem, pf.Image) and "%20" in elem.url and not _SCHEME.match(elem.url):
-            elem.url = elem.url.replace("%20", " ")
+        if isinstance(elem, pf.Image) and "%" in elem.url and not _SCHEME.match(elem.url):
+            elem.url = urllib.parse.unquote(elem.url)
 
     return doc.walk(action)
 

@@ -73,7 +73,7 @@ def _load(url: str, ctx: WriterContext) -> tuple[bytes, str]:
         return _fetch(url, ctx.options.url_timeout_s), Path(parsed.path).suffix.lower()
     if parsed.scheme and len(parsed.scheme) > 1:
         raise _ImageError(f"지원하지 않는 주소 형식: {parsed.scheme}")
-    path = Path(urllib.parse.unquote(url))
+    path = Path(url)  # read_md has already percent-decoded a local path; a second decode would break "a%20b"
     if not path.is_absolute():
         path = (ctx.base_dir or Path.cwd()) / path
     if not path.is_file():

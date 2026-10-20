@@ -312,3 +312,25 @@ def test_math_in_html_table_round_trips_as_math():
     got = back(md)
     expected = [("InlineMath", "y^3"), ("InlineMath", inline), ("InlineMath", r"\theta"), ("DisplayMath", display)]
     assert sorted(maths(got)) == sorted(expected)
+
+
+ODD_STEMS = ["붙임1)계획", "x)y", "(최종", "a<b>", "50%할인", "a%20b", "보고서 (최종) v2"]
+
+
+def test_odd_local_image_paths_round_trip_in_body_and_cells():
+    for stem in ODD_STEMS:
+        url = f"{stem}_assets/image1.png"
+        body = pf.Para(pf.Image(pf.Str("그림"), url=url))
+        pipe = make_table([[cell(txt("h"))]], [[cell(pf.Plain(pf.Image(pf.Str("그림"), url=url)))]])
+        html = make_table(
+            [[cell(txt("a")), cell(txt("b"))]],
+            [[cell(pf.Plain(pf.Image(pf.Str("그림"), url=url)), colspan=2)]],
+        )
+        got = back(write_md(doc_with(body, pipe, html), {}))
+        assert image_urls(got) == [url] * 3, stem
+
+
+def image_urls(doc: pf.Doc) -> list[str]:
+    urls: list[str] = []
+    doc.walk(lambda e, d: urls.append(e.url) if isinstance(e, pf.Image) else None)
+    return urls

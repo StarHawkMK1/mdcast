@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from typing import Any
 
@@ -17,6 +18,9 @@ from mdcast.writers.md.tables import (
 
 GFM_FORMAT = "gfm+footnotes+tex_math_dollars-tex_math_gfm"
 FRONTMATTER_KEYS = ("title", "author", "template")
+_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]+:")  # as read_md: a drive letter is not a scheme
+# characters that end or break a link destination; % first so the codes are not encoded again
+_PATH_CODES = (("%", "%25"), (" ", "%20"), ("(", "%28"), (")", "%29"), ("<", "%3C"), (">", "%3E"))
 
 
 def _convert(doc: pf.Doc) -> str:
@@ -69,8 +73,13 @@ def _figure_blocks(figure: pf.Figure) -> list[pf.Block]:
 def _prepare(elem: pf.Element, _doc: pf.Doc):
     if isinstance(elem, pf.Figure):
         return _figure_blocks(elem)
-    if isinstance(elem, pf.Image) and " " in elem.url:
-        elem.url = elem.url.replace(" ", "%20")  # read_md decodes %20 back to a space
+    if isinstance(elem, pf.Image):
+        if _SCHEME.match(elem.url):
+            elem.url = elem.url.replace(" ", "%20")
+        else:
+            # a local path (e.g. 붙임1)계획_assets/…): read_md percent-decodes it back
+            for char, code in _PATH_CODES:
+                elem.url = elem.url.replace(char, code)
     return None
 
 
