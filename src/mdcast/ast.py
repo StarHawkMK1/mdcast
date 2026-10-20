@@ -9,6 +9,9 @@ import panflute as pf
 import pypandoc
 
 MD_READER_FORMAT = "markdown-markdown_in_html_blocks"
+# pandoc warnings (an unused note key, TeX it cannot draw) are noise on the read and import paths;
+# errors still fail the call
+QUIET = ["--quiet"]
 
 
 def json_to_doc(text: str) -> pf.Doc:
@@ -26,11 +29,11 @@ def clone(doc: pf.Doc) -> pf.Doc:
 
 
 def md_to_doc(text: str) -> pf.Doc:
-    return json_to_doc(pypandoc.convert_text(text, "json", format=MD_READER_FORMAT))
+    return json_to_doc(pypandoc.convert_text(text, "json", format=MD_READER_FORMAT, extra_args=QUIET))
 
 
 def html_to_blocks(html: str) -> list[pf.Element]:
-    return list(json_to_doc(pypandoc.convert_text(html, "json", format="html")).content)
+    return list(json_to_doc(pypandoc.convert_text(html, "json", format="html", extra_args=QUIET)).content)
 
 
 def convert_doc(
@@ -57,4 +60,4 @@ def docx_to_doc(data: bytes) -> pf.Doc:
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "in.docx"
         path.write_bytes(data)
-        return json_to_doc(pypandoc.convert_file(str(path), "json", format="docx"))
+        return json_to_doc(pypandoc.convert_file(str(path), "json", format="docx", extra_args=QUIET))

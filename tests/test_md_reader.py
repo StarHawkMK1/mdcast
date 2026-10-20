@@ -139,3 +139,15 @@ def test_math_span_in_html_table_becomes_math():
     md, _ = read(f"{html}\n".encode())
     found = [(e.format, e.text) for e in _all(md.doc) if isinstance(e, pf.Math)]
     assert found == [("InlineMath", "a < b"), ("DisplayMath", r"\sum i")]
+
+
+def test_pandoc_warnings_are_not_printed(caplog, capfd):
+    import logging
+
+    md = "<table><tr><td>x[^t1]</td></tr></table>\n\n[^t1]: 칸 각주\n"
+    capfd.readouterr()
+    with caplog.at_level(logging.WARNING):
+        got, _ = read(md.encode())
+    assert [pf.stringify(n).strip() for n in _all(got.doc) if isinstance(n, pf.Note)] == ["칸 각주"]
+    assert not [r for r in caplog.records if r.name == "pypandoc"]
+    assert "[WARNING]" not in capfd.readouterr().err

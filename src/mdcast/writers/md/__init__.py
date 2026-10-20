@@ -7,7 +7,7 @@ from typing import Any
 import panflute as pf
 import yaml
 
-from mdcast.ast import clone, convert_doc
+from mdcast.ast import QUIET, clone, convert_doc
 from mdcast.writers.md.tables import (
     html_batch,
     is_simple_table,
@@ -24,7 +24,7 @@ _PATH_CODES = (("%", "%25"), (" ", "%20"), ("(", "%28"), (")", "%29"), ("<", "%3
 
 
 def _convert(doc: pf.Doc) -> str:
-    return convert_doc(doc, GFM_FORMAT, extra_args=["--wrap=none"]).replace("\r\n", "\n")
+    return convert_doc(doc, GFM_FORMAT, extra_args=["--wrap=none", *QUIET]).replace("\r\n", "\n")
 
 
 def _frontmatter(data: dict[str, Any]) -> str:

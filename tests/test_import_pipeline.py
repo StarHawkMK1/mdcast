@@ -122,3 +122,19 @@ def test_hand_written_encoded_image_paths_still_export(tmp_path):
     res = convert(Source(md.encode(), "a.md", Format.MD, base_dir=tmp_path), [Format.DOCX])
     assert res.outputs[0].data is not None
     assert not [e for e in res.report.events if e.code == Codes.IMAGE_FETCH_FAILED]
+
+
+def test_import_prints_no_pandoc_warnings(tmp_path, caplog, capfd):
+    import logging
+
+    md = (
+        "# 개요\n\n<table><tr><th>a</th><th>b</th></tr>"
+        '<tr><td rowspan="2">x[^1]</td><td>y</td></tr><tr><td>z</td></tr></table>\n\n[^1]: 칸 각주\n'
+    )
+    data = strip_mdcast_metadata(export(tmp_path, md, Format.DOCX))
+    capfd.readouterr()
+    with caplog.at_level(logging.WARNING):
+        res = convert(Source(data, "a.docx", Format.DOCX), [Format.MD])
+    assert "[^t1]: 칸 각주" in res.outputs[0].data.decode()
+    assert not [r for r in caplog.records if r.name == "pypandoc"]
+    assert "[WARNING]" not in capfd.readouterr().err
