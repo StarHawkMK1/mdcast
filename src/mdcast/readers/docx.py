@@ -17,6 +17,7 @@ from mdcast.types import Source
 
 SMALL_IMAGE_INCHES = 0.5
 _LENGTH = re.compile(r"^\s*([0-9.]+(?:[eE][-+]?\d+)?)\s*(in|cm|mm|px|pt|pc)?\s*$")
+_UNSAFE_NAME = re.compile(r'[:*?"<>|]')
 _INCHES = {"in": 1.0, "cm": 1 / 2.54, "mm": 1 / 25.4, "px": 1 / 96, "pt": 1 / 72, "pc": 1 / 6, None: 1 / 96}
 
 
@@ -62,8 +63,11 @@ def _has_description(img: pf.Image) -> bool:
 
 
 def _media_name(url: str, n: int) -> str:
-    """File name for an image of an untrusted package: never a path, never empty, ``.`` or ``..``."""
-    name = url.replace("\\", "/").rsplit("/", 1)[-1]
+    """File name for an image of an untrusted package: never a path, never empty, ``.`` or ``..``.
+
+    Characters Windows does not allow in a file name (``: * ? " < > |``) become ``_``.
+    """
+    name = _UNSAFE_NAME.sub("_", url.replace("\\", "/").rsplit("/", 1)[-1])
     return name if name not in ("", ".", "..") else f"image{n}.png"
 
 

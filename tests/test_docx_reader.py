@@ -175,6 +175,13 @@ def test_media_names_never_escape_the_assets_folder():
         assert _media_name(url, 3) == "image3.png"
 
 
+def test_media_names_lose_characters_windows_forbids():
+    from mdcast.readers.docx import _media_name
+
+    assert _media_name('media/a:b*c?d"e<f>g|h.png', 1) == "a_b_c_d_e_f_g_h.png"
+    assert _media_name("media/C:pic.png", 1) == "C_pic.png"
+
+
 def test_odd_media_path_still_imports_inside_assets():
     data = docx_bytes(lambda d: d.add_picture(io.BytesIO(tiny_png())))
     imp, _ = read(_rename_media(data, "media/image1.png", "media/a/b/pic.png"))
