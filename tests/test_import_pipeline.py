@@ -53,6 +53,26 @@ def test_template_is_ignored_for_docx(tmp_path):
     assert res.outputs[0].data is not None
 
 
+def test_typed_punctuation_and_math_keep_full_coverage(tmp_path):
+    from docx_builder import add_para, docx_bytes
+
+    def build(d):
+        add_para(d, "개요", outline=0)
+        add_para(d, "검토 결과는 다음과 같다...")
+        add_para(d, "A--B 구간")
+        add_para(d, "Owner's note")
+
+    res = convert(Source(docx_bytes(build), "a.docx", Format.DOCX), [Format.MD])
+    assert res.report.coverage == 1.0
+    assert not [e for e in res.report.events if e.code == Codes.IMPORT_TEXT_MISSING]
+
+    md = "# 제목\n\n본문 $x^2$ 이다.\n\n| a | b |\n|---|---|\n| $y^3$ | z |\n\nTable: 캡션\n"
+    data = strip_mdcast_metadata(export(tmp_path, md, Format.DOCX))
+    res = convert(Source(data, "m.docx", Format.DOCX), [Format.MD])
+    assert res.report.coverage == 1.0
+    assert not [e for e in res.report.events if e.code == Codes.IMPORT_TEXT_MISSING]
+
+
 def test_large_table_imports_with_few_pandoc_calls(monkeypatch):
     import pypandoc
     from docx_builder import add_para, docx_bytes

@@ -85,3 +85,30 @@ def test_snippets_are_capped_at_three_and_truncated():
     measure_coverage(src, "\n", r)
     msg = missing_events(r)[0].message
     assert "(4문단)" in msg and "'" + "가" * 20 + "…'" in msg and "라라라" not in msg
+
+
+def test_typed_punctuation_matches_smart_read_back():
+    # read_md (pandoc smart) gives … – — ’ “ ” for what the source has as ... -- --- ' "
+    r = make_report()
+    src = ["검토 결과는 다음과 같다...", "A--B 구간", "C---D 구간", "Owner's note", '평범한 "인용" 문장', "이미…“둥근”"]
+    md = "\n\n".join(src) + "\n"
+    assert measure_coverage(src, md, r) == 1.0
+    assert not missing_events(r)
+
+
+def test_inline_and_table_math_do_not_split_the_paragraph():
+    # the source text has no equation text (OMML m:t is not read), the MD has the TeX
+    r = make_report()
+    md = (
+        "본문 $x^2$ 이다.\n\n$$\\sum i$$\n\n"
+        '<table><tr><td>칸 <span class="math inline">\\(y^3\\)</span> 끝</td><td>b</td></tr></table>\n'
+    )
+    assert measure_coverage(["본문  이다.", "칸  끝", "b"], md, r) == 1.0
+    assert not missing_events(r)
+
+
+def test_real_missing_paragraph_still_warns_with_punctuation_and_math():
+    r = make_report()
+    md = "본문 $x$ 이다...\n"
+    assert measure_coverage(["본문  이다...", "없는 문단--입니다"], md, r) < 1.0
+    assert "없는 문단" in missing_events(r)[0].message

@@ -15,8 +15,13 @@ _MAX_SNIPPETS = 3
 _SNIPPET_LEN = 20
 
 
+# read_md reads with pandoc's ``smart``: ... -- --- ' " come back as … – — ’ ” while the source keeps
+# what was typed, so both sides are compared in the typed (ASCII) form.
+_TYPOGRAPHY = str.maketrans({"…": "...", "–": "--", "—": "---", "‘": "'", "’": "'", "“": '"', "”": '"'})
+
+
 def _squash(text: str) -> str:
-    return _SPACE.sub("", text)
+    return _SPACE.sub("", text).translate(_TYPOGRAPHY)
 
 
 def _forms(text: str, prefixes: Sequence[re.Pattern[str]]) -> list[str]:
@@ -33,11 +38,14 @@ def _text_with_notes_apart(doc: pf.Doc) -> str:
     """Body text with each footnote taken out of its sentence and appended after the body.
 
     ``pf.stringify`` would put the note's text where its mark is, splitting the source paragraph
-    (whose ``w:footnoteReference`` has no text) around it.
+    (whose ``w:footnoteReference`` has no text) around it. Math is dropped the same way: the
+    source text has none of an equation's text (``m:t``), the MD has its TeX.
     """
     notes: list[str] = []
 
     def pull(elem: pf.Element, _doc: pf.Doc):
+        if isinstance(elem, pf.Math):
+            return []
         if isinstance(elem, pf.Note):
             notes.append(pf.stringify(elem))
             return []
