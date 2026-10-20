@@ -113,7 +113,7 @@ def test_corpus_document_numbers():
         "tables": 9,
         "rowspan_diff": 0,
         "colspan_diff": 0,
-        "png_assets": 8 if windows else counts["png_assets"],
+        "png_assets": 8 if windows else 0,  # without a WMF renderer the files stay WMF
         "convert_failed": 0 if windows else 8,
         "image_text": 10,
         "text_missing": 0,
