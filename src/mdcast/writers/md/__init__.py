@@ -109,6 +109,8 @@ def write_md(doc: pf.Doc, frontmatter: dict[str, Any]) -> str:
     html_cells.render()
     pipe_cells.render()
     doc = doc.walk(fill)
+    for note in cell_notes:  # a table inside a cell note was written with placeholders too
+        note.walk(fill)
     body = _convert(doc).rstrip("\n")
     definitions = [_note_definition(f"t{i}", n) for i, n in enumerate(cell_notes, 1)]
     if definitions:

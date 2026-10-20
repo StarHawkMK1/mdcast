@@ -348,3 +348,16 @@ def test_copy_element_copies_content_not_ancestors():
     assert copied.parent is doc  # the document itself was not copied
     copied.content[0].text = "b"
     assert pf.stringify(para).startswith("a")
+
+
+def test_table_inside_a_cell_note_keeps_its_cells():
+    inner = make_table([[cell(txt("n1")), cell(txt("n2"))]], [[cell(txt("n3")), cell(txt("n4"))]])
+    note = pf.Note(pf.Para(pf.Str("앞")), inner)
+    merged = make_table(
+        [[cell(txt("h1")), cell(txt("h2"))]],
+        [[cell(pf.Plain(pf.Str("x"), note), rowspan=2), cell(txt("y"))], [cell(txt("z"))]],
+    )
+    md = write_md(doc_with(merged), {})
+    assert "mdcast-cell" not in md
+    assert all(text in md for text in ("n1", "n2", "n3", "n4"))
+    assert all(text in note_texts(back(md))[0] for text in ("앞", "n1", "n4"))
