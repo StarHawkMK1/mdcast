@@ -48,9 +48,28 @@ def _style(table: pf.Table, settings: dict[str, Any]) -> None:
                 _embolden(cell)
     if settings["first_column"].get("bold"):
         for body in table.content:
-            for row in body.content:
-                if row.content:
-                    _embolden(row.content[0])
+            for cell in first_column_cells(list(body.content)):
+                _embolden(cell)
+
+
+def first_column_cells(rows: list[pf.TableRow]) -> list[pf.TableCell]:
+    """Cells that start in grid column 0; a row whose column 0 is covered by a rowspan has none."""
+    covered: list[int] = []  # per column: rows still covered by a rowspan from above
+    cells: list[pf.TableCell] = []
+    for row in rows:
+        col = 0
+        for cell in row.content:
+            while col < len(covered) and covered[col] > 0:
+                col += 1
+            if col == 0:
+                cells.append(cell)
+            span = max(1, cell.colspan)
+            covered.extend([0] * (col + span - len(covered)))
+            for c in range(col, col + span):
+                covered[c] = max(1, cell.rowspan)
+            col += span
+        covered = [max(0, n - 1) for n in covered]
+    return cells
 
 
 def _in_footnote(elem: pf.Element) -> bool:
@@ -97,6 +116,8 @@ def apply(doc: pf.Doc, ctx: FilterContext) -> pf.Doc:
                 pending = None
             _style(block, table_settings(ctx.config, variant))
             variant_of[id(block)] = variant
+            if ctx.target is Format.HWPX and variant:
+                block.attributes["mdcast-variant"] = variant
             head_rows = len(block.head.content)
             if ctx.target is Format.PDF:
                 out.append(raw_block(f'#mdcast-table(cfg, "{variant or "_default"}", {head_rows})[', "typst"))

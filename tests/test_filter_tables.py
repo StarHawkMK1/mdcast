@@ -104,3 +104,27 @@ def test_second_marker_reports_the_unattached_first():
     _, ctx = run(md, overrides=VARIANTS)
     codes = [(e.code, e.where.get("variant")) for e in ctx.report.events]
     assert codes[0] == (Codes.TABLE_VARIANT_UNKNOWN, "plain")
+
+
+def test_hwpx_tables_carry_their_variant():
+    doc, _ = run(TWO_TABLES, target=Format.HWPX, overrides=VARIANTS)
+    first, second = doc.content
+    assert first.attributes["mdcast-variant"] == "plain"
+    assert "mdcast-variant" not in second.attributes
+
+
+def test_docx_tables_get_no_variant_attribute():
+    doc, _ = run(TWO_TABLES, overrides=VARIANTS)
+    assert all("mdcast-variant" not in t.attributes for t in doc.content)
+
+
+ROWSPAN = "+----+----+\n| 가 | 1  |\n+    +----+\n|    | 2  |\n+----+----+\n| 나 | 3  |\n+----+----+\n"
+
+
+def test_first_column_bold_follows_the_grid_under_a_rowspan():
+    doc, _ = run(ROWSPAN, overrides={"tables": {"first_column": {"bold": True}}})
+    rows = [row for body in doc.content[0].content for row in body.content]
+    texts = [[pf.stringify(c) for c in row.content] for row in rows]
+    bold = [[isinstance(c.content[0].content[0], pf.Strong) for c in row.content] for row in rows]
+    assert texts == [["가", "1"], ["2"], ["나", "3"]]
+    assert bold == [[True, False], [False], [True, False]]
