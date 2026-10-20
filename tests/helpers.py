@@ -316,3 +316,10 @@ def line_starts(data: bytes, needle: str, page: int = 0) -> list[tuple[float, fl
         if ch.strip() and (not starts or abs(y - starts[-1][1]) > 1.0):
             starts.append((x, y))
     return starts
+
+
+def export(tmp_path: Path, md: str, target: Format = Format.DOCX, template: str | None = None) -> bytes:
+    from mdcast.pipeline import WRITERS
+
+    doc, ctx = build(tmp_path, md, target, template)
+    return WRITERS[target](doc, ctx)
