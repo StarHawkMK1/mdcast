@@ -52,7 +52,9 @@
   let inner = t.border.width * 1pt + rgb(t.border.color)
   let outer = t.border_outer.width * 1pt + rgb(t.border_outer.color)
   set text(size: t.font_size * 1pt, .._lines(t.line_height))
-  set par(spacing: 0pt)  // no gap between paragraphs in a cell, as in the docx cells
+  // no gap between paragraphs in a cell, as in the docx cells; only in the cells, or the figure
+  // around the table loses its spacing too and two tables in a row touch
+  show table.cell: set par(spacing: 0pt)
   set table.header(repeat: t.header.repeat)
   set table(
     inset: t.cell_padding * 1mm,

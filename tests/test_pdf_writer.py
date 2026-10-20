@@ -240,3 +240,15 @@ def test_picture_without_its_dpi_is_taken_at_96(tmp_path, ext, kwargs, dpi):
     Image.new("RGB", (200, 100), (40, 120, 200)).save(tmp_path / f"a.{ext}", **kwargs)
     data, _ = render(tmp_path, f"![그림](a.{ext})\n")
     assert image_widths_mm(data) == pytest.approx([200 / dpi * 25.4], abs=0.05)
+
+
+def test_consecutive_tables_keep_the_paragraph_gap(tmp_path):
+    # the cells' zero paragraph spacing must not reach the figures around the tables
+    one = "| 칸 |\n|---|\n| 하나 |\n| 둘째 |\n"
+    two = "| 칸 |\n|---|\n| 하나 |\n\n| 둘째 |\n|---|\n| 셋 |\n"
+
+    def pitch(md: str) -> float:
+        data, _ = render(tmp_path, md)
+        return char_origin(data, "둘째")[1] - char_origin(data, "하나")[1]
+
+    assert pitch(two) - pitch(one) == pytest.approx(4 * 25.4 / 72, abs=0.3)  # body space_after 4pt
