@@ -51,3 +51,25 @@ def test_hwpx_and_pdf_input_still_unsupported():
 def test_template_is_ignored_for_docx(tmp_path):
     res = convert(Source(_docx(tmp_path), "a.docx", Format.DOCX), [Format.MD], template="없는템플릿")
     assert res.outputs[0].data is not None
+
+
+def test_large_table_imports_with_few_pandoc_calls(monkeypatch):
+    import pypandoc
+    from docx_builder import add_para, docx_bytes
+
+    def build(d):
+        add_para(d, "제목", outline=0)
+        table = d.add_table(rows=50, cols=6)
+        for r in range(50):
+            for c in range(6):
+                table.cell(r, c).text = f"칸 {r}-{c}"
+        table.cell(1, 0).merge(table.cell(2, 0))  # a merged cell makes it an HTML table
+
+    data = docx_bytes(build)
+    calls: list[str] = []
+    real = pypandoc.convert_text, pypandoc.convert_file
+    monkeypatch.setattr(pypandoc, "convert_text", lambda *a, **k: calls.append("t") or real[0](*a, **k))
+    monkeypatch.setattr(pypandoc, "convert_file", lambda *a, **k: calls.append("f") or real[1](*a, **k))
+    res = convert(Source(data, "a.docx", Format.DOCX), [Format.MD])
+    assert len(calls) <= 8  # was one call per cell (300+)
+    assert "칸 49-5" in res.outputs[0].data.decode() and res.report.coverage == 1.0

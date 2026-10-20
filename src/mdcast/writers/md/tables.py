@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import secrets
 from collections.abc import Callable
 from copy import deepcopy
 
@@ -8,6 +9,7 @@ import panflute as pf
 
 from mdcast.ast import convert_doc
 
+PIPE_CELL_FORMAT = "gfm+tex_math_dollars-tex_math_gfm"
 _TAG = re.compile(r"<[A-Za-z][^<>]*>")
 _NOISE_ATTR = re.compile(r'\s(?:style|class|width|height|id)="[^"]*"')
 
@@ -67,51 +69,101 @@ def _clean(html: str) -> str:
     return _TAG.sub(lambda m: _NOISE_ATTR.sub("", m.group(0)), html.replace("\r\n", "\n")).strip()
 
 
-def _blocks_html(blocks: list[pf.Block], note_label: Callable[[pf.Note], str]) -> str:
+def _squeeze(text: str) -> str:
+    return " ".join(text.split())
+
+
+class CellBatch:
+    """Cell contents queued for one pandoc call instead of one call per cell.
+
+    ``add`` returns a placeholder (an HTML comment) to put where the cell's text goes; ``render``
+    converts every queued cell at once (split apart again at separator comments) and ``fill``
+    swaps the placeholders for the rendered text, also inside rendered cells (nested tables).
+    """
+
+    def __init__(self, to: str, finish: Callable[[str], str]) -> None:
+        self._to = to
+        self._finish = finish
+        self._jobs: list[list[pf.Block]] = []
+        self._texts: list[str] = []
+        self._mark = f"mdcast-cell-{secrets.token_hex(6)}"
+        self._slot = re.compile(rf"<!--{self._mark}-(\d+)-->")
+
+    def add(self, blocks: list[pf.Block]) -> str:
+        self._jobs.append(blocks)
+        return f"<!--{self._mark}-{len(self._jobs) - 1}-->"
+
+    def render(self) -> None:
+        if not self._jobs:
+            return
+        separator = f"<!--{self._mark}-->"
+        content: list[pf.Block] = []
+        for i, job in enumerate(self._jobs):
+            if i:
+                content.append(pf.RawBlock(separator, "html"))
+            content += job
+        text = convert_doc(pf.Doc(*content), self._to, extra_args=["--wrap=none"])
+        parts = text.split(separator)
+        if len(parts) != len(self._jobs):
+            raise RuntimeError(f"표 칸 {len(self._jobs)}개를 나누지 못했습니다 ({len(parts)}조각)")
+        self._texts = [self._finish(part) for part in parts]
+
+    def fill(self, text: str) -> str:
+        return self._slot.sub(lambda m: self.fill(self._texts[int(m.group(1))]), text)
+
+
+def html_batch() -> CellBatch:
+    return CellBatch("html", _clean)
+
+
+def pipe_batch() -> CellBatch:
+    return CellBatch(PIPE_CELL_FORMAT, _squeeze)
+
+
+def _blocks_html(blocks: list[pf.Block], note_label: Callable[[pf.Note], str], batch: CellBatch) -> str:
     blocks = [deepcopy(b) for b in blocks]
 
     def action(elem: pf.Element, _doc: pf.Doc):
         if isinstance(elem, pf.Table):
-            return pf.RawBlock(table_to_html(elem, note_label), "html")
+            return pf.RawBlock(table_to_html(elem, note_label, batch), "html")
         if isinstance(elem, pf.Note):
             return pf.Str(f"[^{note_label(elem)}]")
         return None
 
-    walked = [b.walk(action, stop_if=lambda e: isinstance(e, pf.Table)) for b in blocks]
-    html = convert_doc(pf.Doc(*walked), "html", extra_args=["--wrap=none"])
-    return _clean(html)
+    return batch.add([b.walk(action, stop_if=lambda e: isinstance(e, pf.Table)) for b in blocks])
 
 
-def _cell_html(cell: pf.TableCell, tag: str, note_label: Callable[[pf.Note], str]) -> str:
+def _cell_html(cell: pf.TableCell, tag: str, note_label: Callable[[pf.Note], str], batch: CellBatch) -> str:
     attrs = ""
     if cell.rowspan > 1:
         attrs += f' rowspan="{cell.rowspan}"'
     if cell.colspan > 1:
         attrs += f' colspan="{cell.colspan}"'
-    return f"<{tag}{attrs}>{_blocks_html(list(cell.content), note_label)}</{tag}>"
+    return f"<{tag}{attrs}>{_blocks_html(list(cell.content), note_label, batch)}</{tag}>"
 
 
-def _row_html(row: pf.TableRow, tag: str, note_label: Callable[[pf.Note], str]) -> str:
-    cells = "".join(_cell_html(c, tag, note_label) for c in row.content)
+def _row_html(row: pf.TableRow, tag: str, note_label: Callable[[pf.Note], str], batch: CellBatch) -> str:
+    cells = "".join(_cell_html(c, tag, note_label, batch) for c in row.content)
     return f"<tr>{cells}</tr>"
 
 
-def table_to_html(table: pf.Table, note_label: Callable[[pf.Note], str]) -> str:
+def table_to_html(table: pf.Table, note_label: Callable[[pf.Note], str], batch: CellBatch) -> str:
+    """The table as clean HTML with a placeholder per cell: ``batch.fill`` it after ``batch.render``."""
     out = ["<table>"]
     if table.caption and table.caption.content:
         caption = list(table.caption.content)
         if len(caption) == 1 and isinstance(caption[0], pf.Para):
             # one paragraph is written bare, so it reads back as Plain like a `Table:` caption
             caption = [pf.Plain(*deepcopy(list(caption[0].content)))]
-        out.append(f"<caption>{_blocks_html(caption, note_label)}</caption>")
+        out.append(f"<caption>{_blocks_html(caption, note_label, batch)}</caption>")
     if table.head and table.head.content:
         out.append("<thead>")
-        out += [_row_html(r, "th", note_label) for r in table.head.content]
+        out += [_row_html(r, "th", note_label, batch) for r in table.head.content]
         out.append("</thead>")
     body_rows = _rows(table)[len(table.head.content) if table.head else 0:]
     if body_rows:
         out.append("<tbody>")
-        out += [_row_html(r, "td", note_label) for r in body_rows]
+        out += [_row_html(r, "td", note_label, batch) for r in body_rows]
         out.append("</tbody>")
     out.append("</table>")
     return "\n".join(out)
@@ -125,18 +177,18 @@ _PIPE_RULE = {
 }
 
 
-def _pipe_cell(cell: pf.TableCell) -> str:
+def _pipe_cell(cell: pf.TableCell, batch: CellBatch) -> str:
     if not cell.content:
         return ""
-    text = convert_doc(pf.Doc(deepcopy(cell.content[0])), "gfm+tex_math_dollars-tex_math_gfm", extra_args=["--wrap=none"])
-    return " ".join(text.split())
+    return batch.add([deepcopy(cell.content[0])])
 
 
-def table_to_pipe(table: pf.Table) -> str:
+def table_to_pipe(table: pf.Table, batch: CellBatch) -> str:
+    """The table as a pipe table with a placeholder per cell: ``batch.fill`` it after ``batch.render``."""
     head = list(table.head.content[0].content)
     rule = [_PIPE_RULE.get(spec[0], "---") for spec in table.colspec]
     rule += ["---"] * (len(head) - len(rule))
-    lines = ["| " + " | ".join(_pipe_cell(c) for c in head) + " |", "| " + " | ".join(rule) + " |"]
+    lines = ["| " + " | ".join(_pipe_cell(c, batch) for c in head) + " |", "| " + " | ".join(rule) + " |"]
     for row in _rows(table)[1:]:
-        lines.append("| " + " | ".join(_pipe_cell(c) for c in row.content) + " |")
+        lines.append("| " + " | ".join(_pipe_cell(c, batch) for c in row.content) + " |")
     return "\n".join(lines)

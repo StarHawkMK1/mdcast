@@ -7,7 +7,13 @@ import panflute as pf
 import yaml
 
 from mdcast.ast import clone, convert_doc
-from mdcast.writers.md.tables import is_simple_table, table_to_html, table_to_pipe
+from mdcast.writers.md.tables import (
+    html_batch,
+    is_simple_table,
+    pipe_batch,
+    table_to_html,
+    table_to_pipe,
+)
 
 GFM_FORMAT = "gfm+footnotes+tex_math_dollars-tex_math_gfm"
 FRONTMATTER_KEYS = ("title", "author", "template")
@@ -76,15 +82,25 @@ def write_md(doc: pf.Doc, frontmatter: dict[str, Any]) -> str:
         cell_notes.append(note)
         return f"t{len(cell_notes)}"
 
+    # every table cell of the document is rendered in one pandoc call per format, not one per cell
+    html_cells, pipe_cells = html_batch(), pipe_batch()
+
     def action(elem: pf.Element, _doc: pf.Doc):
         if isinstance(elem, pf.Table):
             if is_simple_table(elem):
-                return pf.RawBlock(table_to_pipe(elem), "gfm")
-            return pf.RawBlock(table_to_html(elem, note_label), "html")
+                return pf.RawBlock(table_to_pipe(elem, pipe_cells), "gfm")
+            return pf.RawBlock(table_to_html(elem, note_label, html_cells), "html")
         return None
+
+    def fill(elem: pf.Element, _doc: pf.Doc):
+        if isinstance(elem, pf.RawBlock):
+            elem.text = pipe_cells.fill(html_cells.fill(elem.text))
 
     doc = doc.walk(_prepare)
     doc = doc.walk(action, stop_if=lambda e: isinstance(e, pf.Table))
+    html_cells.render()
+    pipe_cells.render()
+    doc = doc.walk(fill)
     body = _convert(doc).rstrip("\n")
     definitions = [_note_definition(f"t{i}", n) for i, n in enumerate(cell_notes, 1)]
     if definitions:

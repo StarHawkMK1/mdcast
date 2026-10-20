@@ -249,3 +249,40 @@ def test_image_path_with_space_in_pipe_cell_and_cell_note_is_encoded():
 def test_remote_image_url_keeps_percent_encoding():
     got = back("![x](https://example.com/a%20b.png)\n")
     assert first(got, pf.Image).url == "https://example.com/a%20b.png"
+
+
+def count_pandoc_calls(monkeypatch) -> list[str]:
+    import pypandoc
+
+    calls: list[str] = []
+    for name in ("convert_text", "convert_file"):
+        real = getattr(pypandoc, name)
+
+        def counting(*args, _real=real, _name=name, **kwargs):
+            calls.append(_name)
+            return _real(*args, **kwargs)
+
+        monkeypatch.setattr(pypandoc, name, counting)
+    return calls
+
+
+def test_cells_of_every_table_render_in_one_pandoc_call_per_format(monkeypatch):
+    rows = 50
+    head = [cell(txt(f"h{c}")) for c in range(6)]
+    pipe = make_table([head], [[cell(txt(f"p{r}-{c}")) for c in range(6)] for r in range(rows)])
+    body = [[cell(txt(f"m{r}-{c}")) for c in range(6)] for r in range(rows)]
+    body[0][0] = cell(pf.Plain(pf.Str("m0-0"), pf.Note(pf.Para(pf.Str("칸각주")))), rowspan=2)
+    del body[1][0]
+    inner = make_table([[cell(txt("i1")), cell(txt("i2"))]], [[cell(txt("i3")), cell(txt("i4"))]])
+    body[2][1] = cell(inner)
+    merged = make_table([[cell(txt(f"h{c}")) for c in range(6)]], body)
+    calls = count_pandoc_calls(monkeypatch)
+    md = write_md(doc_with(pipe, merged), {})
+    assert len(calls) <= 4  # html cells, pipe cells, the body, the one cell note
+    assert "mdcast-cell" not in md
+    got = tables(back(md))
+    assert [len(t.content[0].content) for t in got] == [rows, rows]
+    assert pf.stringify(got[0].content[0].content[-1].content[-1]).strip() == f"p{rows - 1}-5"
+    assert pf.stringify(got[1].content[0].content[-1].content[-1]).strip() == f"m{rows - 1}-5"
+    assert spans(got[1])[1][0] == (2, 1) and note_texts(back(md)) == ["칸각주"]
+    assert pf.stringify(got[1].content[0].content[2].content[1]).replace("\n", "") == "i1i2i3i4"
