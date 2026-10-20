@@ -190,7 +190,7 @@ def test_first_run_shows_no_panflute_syntax_warning(tmp_path):
 def test_unknown_format_message_is_korean_only(env):
     r = run("convert", str(write_md(env)), "--to", "txt")
     assert r.exit_code == 2
-    assert "지원하지 않는 형식: txt (docx, pdf 중 선택)" in r.output
+    assert "지원하지 않는 형식: txt (md, docx, hwpx, pdf 중 선택)" in r.output
     assert "is not a valid" not in r.output
 
 
@@ -198,3 +198,67 @@ def test_quiet_success_prints_nothing(env):
     r = run("convert", str(write_md(env)), "--quiet", "--offline")
     assert r.exit_code == 0
     assert r.output == ""
+
+
+def _docx_input(env, name="x.docx", md="# 개요\n\n본문\n\n![](sample.png)\n"):
+    from docx_builder import strip_mdcast_metadata
+    from helpers import export
+
+    from mdcast.types import Format
+
+    shutil_copy = __import__("shutil").copy
+    shutil_copy(Path(__file__).parent / "fixtures" / "md" / "assets" / "sample.png", env / "sample.png")
+    path = env / name
+    path.write_bytes(strip_mdcast_metadata(export(env, md, Format.DOCX)))
+    return path
+
+
+def test_import_defaults_to_md_and_writes_assets(env):
+    r = run("convert", str(_docx_input(env, "보고 서.docx")))
+    assert r.exit_code == 0, r.output
+    assert "# 개요" in (env / "보고 서.md").read_text(encoding="utf-8")
+    assert len(list((env / "보고 서_assets").glob("*.png"))) == 1
+    assert "내용 보존 100.0%" in r.output
+
+
+def test_import_refuses_existing_md(env):
+    docx_path = _docx_input(env)
+    (env / "x.md").write_text("손으로 쓴 원본", encoding="utf-8")
+    r = run("convert", str(docx_path))
+    assert r.exit_code == 1 and "--force" in r.output
+    assert (env / "x.md").read_text(encoding="utf-8") == "손으로 쓴 원본" and not (env / "x_assets").exists()
+
+
+def test_import_refuses_existing_assets_dir(env):
+    docx_path = _docx_input(env)
+    (env / "x_assets").mkdir()
+    r = run("convert", str(docx_path))
+    assert r.exit_code == 1 and "--force" in r.output
+    assert not (env / "x.md").exists() and list((env / "x_assets").iterdir()) == []
+
+
+def test_force_overwrites_and_clears_assets(env):
+    docx_path = _docx_input(env)
+    (env / "x_assets").mkdir()
+    (env / "x_assets" / "old.png").write_bytes(b"x")
+    (env / "x.md").write_text("손으로 쓴 원본", encoding="utf-8")
+    r = run("convert", str(docx_path), "--force")
+    assert r.exit_code == 0, r.output
+    assert not (env / "x_assets" / "old.png").exists() and len(list((env / "x_assets").glob("*.png"))) == 1
+    assert "# 개요" in (env / "x.md").read_text(encoding="utf-8")
+
+
+def test_export_still_overwrites(env):
+    md = write_md(env, "x.md")
+    (env / "x.docx").write_bytes(b"old")
+    r = run("convert", str(md))
+    assert r.exit_code == 0, r.output
+    assert (env / "x.docx").read_bytes() != b"old"
+
+
+def test_corrupt_docx_cli_exit_1_no_traceback(env):
+    path = env / "bad.docx"
+    path.write_bytes(b"PK\x03\x04broken")
+    r = run("convert", str(path))
+    assert r.exit_code == 1 and "Traceback" not in r.output
+    assert "입력을 해석할 수 없습니다" in r.output and not (env / "bad.md").exists()

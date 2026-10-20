@@ -13,6 +13,7 @@ from mdcast import __version__
 from mdcast.ast import clone, pandoc_version
 from mdcast.fields import ResolvedFields, resolve_fields
 from mdcast.filters import FilterContext, run_filters
+from mdcast.importing import import_document
 from mdcast.readers.md import read_md
 from mdcast.report import Codes, Report
 from mdcast.templates import ResolvedTemplate, resolve_template
@@ -94,8 +95,11 @@ def convert(
     report = Report(source.name, source.format)
     outputs = [Output(t, output_name(source.name, t), None) for t in dict.fromkeys(targets)]
 
+    if source.format is Format.DOCX:
+        return import_document(source, targets, options)
     if source.format is not Format.MD:
-        report.error(Codes.INPUT_UNSUPPORTED, f"{source.format.value} 입력 변환은 아직 지원하지 않습니다 (M3 예정)")
+        milestone = {Format.HWPX: "M3b", Format.PDF: "M3c"}.get(source.format, "M3")
+        report.error(Codes.INPUT_UNSUPPORTED, f"{source.format.value} 입력은 아직 지원하지 않습니다 ({milestone} 예정)")
         report.set_outputs(outputs)
         return Result(outputs, report)
     try:

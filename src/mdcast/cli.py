@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -48,6 +49,8 @@ def render_human(report: Report, *, verbose: bool, quiet: bool) -> str:
                 label += " · 그릇은 내장"
             line += f"  템플릿: {info.name} v{info.version} ({label})"
         lines.append(line)
+        if report.coverage is not None and output["format"] == "md" and output["status"] != "failed":
+            lines.append(f"  내용 보존 {report.coverage:.1%}")
     for event in report.events:
         if event.level is Level.INFO and not verbose:
             continue
@@ -82,9 +85,29 @@ def main() -> None:
     """mdcast — Markdown ↔ docx · hwpx · pdf, 템플릿 기반 변환기."""
 
 
+def _refuse_existing(result, destination: Path, force: bool) -> None:
+    """Import never overwrites by surprise: nothing is written when x.md or x_assets/ is already there."""
+    for output in result.outputs:
+        if output.data is None or output.format is not Format.MD:
+            continue
+        stem = Path(output.name).stem
+        clashes = [n for n in (output.name, f"{stem}_assets") if (destination / n).exists()]
+        if not clashes:
+            continue
+        if force:
+            shutil.rmtree(destination / f"{stem}_assets", ignore_errors=True)
+            continue
+        result.report.error(
+            Codes.OUTPUT_EXISTS,
+            f"{clashes[0]} 이(가) 이미 있습니다. 덮어쓰려면 --force 를 주세요",
+            format=output.format.value,
+        )
+        output.data = None
+
+
 @main.command()
 @click.argument("input_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
-@click.option("--to", "to", default="docx", show_default=True, help="출력 포맷, 쉼표로 구분 (docx,hwpx,pdf)")
+@click.option("--to", "to", default=None, help="출력 포맷, 쉼표로 구분 (기본: md 입력은 docx, 그 밖은 md)")
 @click.option("--template", default=None, help="템플릿 이름 또는 폴더 경로")
 @click.option("--out-dir", type=click.Path(file_okay=False, path_type=Path), default=None, help="출력 폴더 (기본: 입력 파일 폴더)")
 @click.option("--json", "as_json", is_flag=True, help="리포트를 JSON 으로 출력")
@@ -92,8 +115,15 @@ def main() -> None:
 @click.option("--quiet", is_flag=True, help="실패만 표시")
 @click.option("--keep-temp", is_flag=True, help="중간 산출물(AST, Typst 소스 등)을 남김")
 @click.option("--offline", is_flag=True, help="외부 이미지를 내려받지 않음")
-def convert(input_path, to, template, out_dir, as_json, verbose, quiet, keep_temp, offline) -> None:
-    """MD 파일을 템플릿에 맞춰 변환합니다."""
+@click.option("--force", is_flag=True, help="가져오기 결과(.md, _assets 폴더)가 이미 있어도 덮어씀")
+def convert(input_path, to, template, out_dir, as_json, verbose, quiet, keep_temp, offline, force) -> None:
+    """MD 를 docx·hwpx·pdf 로, docx 를 MD 로 변환합니다."""
+    try:
+        source_format = Format.from_filename(input_path.name)
+    except ValueError:
+        raise click.UsageError(f"지원하지 않는 입력 형식: {input_path.name} (.md, .docx 파일을 지정하세요)") from None
+    if to is None:
+        to = "docx" if source_format is Format.MD else "md"
     targets = []
     for name in (t.strip() for t in to.split(",")):
         if not name:
@@ -101,11 +131,7 @@ def convert(input_path, to, template, out_dir, as_json, verbose, quiet, keep_tem
         try:
             targets.append(Format.parse(name))
         except ValueError:
-            raise click.UsageError(f"지원하지 않는 형식: {name} (docx, pdf 중 선택)") from None
-    try:
-        source_format = Format.from_filename(input_path.name)
-    except ValueError:
-        raise click.UsageError(f"지원하지 않는 입력 형식: {input_path.name} (.md 파일을 지정하세요)") from None
+            raise click.UsageError(f"지원하지 않는 형식: {name} (md, docx, hwpx, pdf 중 선택)") from None
     if not targets:
         raise click.UsageError("--to 에 출력 포맷을 지정하세요")
     try:
@@ -121,12 +147,19 @@ def convert(input_path, to, template, out_dir, as_json, verbose, quiet, keep_tem
         click.echo(f"✖ 변환 중 오류가 발생했습니다: {exc}", err=True)
         sys.exit(1)
     destination = out_dir or input_path.parent
+    importing = source_format is not Format.MD
+    if importing:
+        _refuse_existing(result, destination, force)
     for output in result.outputs:
         if output.data is None:
             continue
         try:
             destination.mkdir(parents=True, exist_ok=True)
             (destination / output.name).write_bytes(output.data)
+            for key, blob in output.assets.items():
+                target = destination / key
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(blob)
         except OSError as exc:
             result.report.error(Codes.OUTPUT_WRITE_FAILED, f"{output.name} 을(를) 저장하지 못했습니다: {exc}", format=output.format.value)
             output.data = None
