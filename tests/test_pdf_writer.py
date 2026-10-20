@@ -1,8 +1,9 @@
 from pathlib import Path
 
+import panflute as pf
 import pypdfium2 as pdfium
 import pytest
-from helpers import build, line_pitch, write_template
+from helpers import build, char_origin, line_pitch, write_template
 
 from mdcast.report import Codes
 from mdcast.types import Format
@@ -194,3 +195,29 @@ def test_extreme_line_heights_still_compile(tmp_path, ratio):
     tpl = write_template(tmp_path, "t", f"name: t\nelements: {{body: {{line_height: {ratio}}}}}\n")
     data, _ = render(tmp_path, f"본문{LONG}\n", str(tpl))
     assert data.startswith(b"%PDF")
+
+
+GRID_TABLE = """
++------+------------+-------+
+| 가가 | 나나       | 다다  |
++======+============+=======+
+| 왼쪽 | 중간       | 오른  |
++------+------------+-------+
+"""
+
+
+@pytest.mark.parametrize("width", ["full", "auto"])
+def test_grid_table_columns_take_their_fraction_of_the_body_width(tmp_path, width):
+    # grid table fractions sum below 1; the columns must not shrink by that sum a second time
+    tpl = write_template(tmp_path, "t", f"name: t\ntables: {{width: {width}}}\n")
+    doc, ctx = build(tmp_path, GRID_TABLE, Format.PDF, template=str(tpl))
+    tables: list[pf.Table] = []
+    doc.walk(lambda e, _d: tables.append(e) if isinstance(e, pf.Table) else None)
+    widths = [w for _, w in tables[0].colspec]
+    data = write_pdf(doc, ctx)
+    x = [char_origin(data, needle)[0] for needle in ("왼", "중", "오")]
+    body = 170.0  # A4 less 20mm margins
+    assert x[1] - x[0] == pytest.approx(widths[0] * body, abs=0.5)
+    assert x[2] - x[1] == pytest.approx(widths[1] * body, abs=0.5)
+    if width == "full":
+        assert x[0] == pytest.approx(20 + 1.5, abs=0.5)  # margin + cell padding

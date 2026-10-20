@@ -65,9 +65,11 @@
     },
   )
   // breakable so long tables flow onto the next pages (header rows repeat); the measured
-  // width keeps the outer border hugging an auto-width table
+  // width keeps the outer border hugging an auto-width table. The inner block keeps the
+  // available width as the base of percentage columns, or they would shrink a second time.
   show table: it => layout(size => block(
-    breakable: true, stroke: outer, width: measure(it, width: size.width).width, it))
+    breakable: true, stroke: outer, width: measure(it, width: size.width).width,
+    block(width: size.width, it)))
   body
 }
 

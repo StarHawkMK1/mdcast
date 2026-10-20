@@ -30,14 +30,23 @@ def _embolden(cell: pf.TableCell) -> None:
             block.content = [pf.Strong(*inlines)]
 
 
+def _full_widths(colspec: list[tuple[str, Any]]) -> list[Any]:
+    """Fractions summing to 1; a column without one gets the others' mean (grid tables give ~0.65)."""
+    given = [w for _, w in colspec if isinstance(w, (int, float)) and w > 0]
+    mean = sum(given) / len(given) if given else 1.0
+    filled = [w if isinstance(w, (int, float)) and w > 0 else mean for _, w in colspec]
+    total = sum(filled) or 1.0
+    return [w / total for w in filled]
+
+
 def _style(table: pf.Table, settings: dict[str, Any]) -> None:
     body_align = _ALIGN.get(settings["body"].get("align"), "AlignDefault")
-    full = settings.get("width") == "full"
-    widths_default = all(width == "ColWidthDefault" for _, width in table.colspec)
-    n = len(table.colspec) or 1
+    widths = (
+        _full_widths(table.colspec) if settings.get("width") == "full" else [w for _, w in table.colspec]
+    )
     table.colspec = [
-        (body_align if align == "AlignDefault" else align, 1.0 / n if full and widths_default else width)
-        for align, width in table.colspec
+        (body_align if align == "AlignDefault" else align, width)
+        for (align, _), width in zip(table.colspec, widths)
     ]
     header_align = _ALIGN.get(settings["header"].get("align"))
     for row in table.head.content:

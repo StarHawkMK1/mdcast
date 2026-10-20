@@ -1,4 +1,5 @@
 import panflute as pf
+import pytest
 
 from mdcast.ast import md_to_doc
 from mdcast.filters import tables
@@ -58,6 +59,21 @@ def test_full_width_sets_equal_fractions_and_auto_keeps_default():
     assert [w for _, w in doc.content[0].colspec] == [0.5, 0.5]
     doc, _ = run("| a | b |\n|---|---|\n| 1 | 2 |\n", overrides={"tables": {"width": "auto"}})
     assert [w for _, w in doc.content[0].colspec] == ["ColWidthDefault", "ColWidthDefault"]
+
+
+GRID = "+----+--------+\n| a  | b      |\n+====+========+\n| 1  | 2      |\n+----+--------+\n"
+
+
+def test_full_width_scales_grid_fractions_to_one_and_auto_keeps_them():
+    # a grid table's fractions come from its source width and sum below 1
+    raw = [w for _, w in md_to_doc(GRID).content[0].colspec]
+    assert sum(raw) < 0.9
+    doc, _ = run(GRID)
+    widths = [w for _, w in doc.content[0].colspec]
+    assert sum(widths) == pytest.approx(1.0)
+    assert widths[1] / widths[0] == pytest.approx(raw[1] / raw[0])
+    doc, _ = run(GRID, overrides={"tables": {"width": "auto"}})
+    assert [w for _, w in doc.content[0].colspec] == raw
 
 
 def test_pdf_wraps_top_level_tables():
