@@ -62,12 +62,42 @@ def test_bold_numbered_paragraphs_become_headings_by_first_appearance():
 
 
 def test_dotted_decimal_without_bold_is_one_below_its_parent():
-    r = Run(header(1, "1. 일반사항"), para("본문"), para("2.1 시험대상 제품"), para("본문"))
-    assert r.levels == [("1. 일반사항", 1), ("2.1 시험대상 제품", 2)]
+    r = Run(header(1, "1. 일반사항"), para("본문"), para("1.1 시험대상 제품"), para("본문"))
+    assert r.levels == [("1. 일반사항", 1), ("1.1 시험대상 제품", 2)]
+
+
+def test_dotted_decimal_without_bold_only_under_its_own_number():
+    r = Run(header(1, "1. 일반사항"), para("2.1 시험대상 제품"), header(1, "2. 시험"), para("2.1 시험 방법"))
+    assert r.levels == [("1. 일반사항", 1), ("2. 시험", 1), ("2.1 시험 방법", 2)]
+    assert isinstance(r.doc.content[1], pf.Para)
+
+
+def test_dotted_decimal_without_bold_needs_a_numbered_section():
+    r = Run(header(1, "개요"), para("0.5 이하로 유지한다"), para("3.5 기준 적용"), para("1.1 항목"))
+    assert r.levels == [("개요", 1)]
+    r = Run(header(1, "1. 개요"), para("3.5 기준 적용"), header(1, "부록"), para("1.1 항목"))
+    assert r.levels == [("1. 개요", 1), ("부록", 1)]
+
+
+def test_leading_zero_and_dates_are_never_headings():
+    r = Run(
+        header(1, "1. 개요"),
+        para_b("0.5 이하"),
+        para_b("2026. 10. 21."),
+        para("2026. 10. 21."),
+        para_b("2026.10.21 기준"),
+        para("1.0 판"),
+    )
+    assert r.levels == [("1. 개요", 1), ("1.0 판", 2)]
+
+
+def test_any_existing_header_seeds_the_depth():
+    r = Run(header(1, "개요"), para("본문"), para_b("1. 목적"), para("1.1 범위"))
+    assert r.levels == [("개요", 1), ("1. 목적", 2), ("1.1 범위", 3)]
 
 
 def test_dotted_decimal_before_base_is_known_sets_base():
-    r = Run(para_b("Ⅰ. 서론"), para("1.1 배경"), para("본문"), para_b("2. 계획"))
+    r = Run(para_b("Ⅰ. 서론"), para_b("1.1 배경"), para("본문"), para_b("2. 계획"))
     assert r.levels == [("Ⅰ. 서론", 1), ("1.1 배경", 2), ("2. 계획", 1)]
 
 

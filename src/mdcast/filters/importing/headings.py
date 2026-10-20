@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import panflute as pf
 
 from mdcast.filters.importing.context import ImportContext
@@ -9,6 +11,8 @@ from mdcast.report import Codes
 _MAX_TEXT = 60
 _MAX_TITLE = 40
 _MAX_LEVEL = 6
+_LEAD = re.compile(r"^(\d+)\.")
+_DATE = re.compile(r"^\d{4}\.\s*\d{1,2}\.\s*\d{1,2}\.?(?:\s|$)")  # 2026. 10. 21.
 
 
 def _text(block: pf.Element) -> str:
@@ -37,11 +41,13 @@ class _Levels:
         self.bases: dict[str, int] = {}
         self.deepest = 0
 
-    def seed(self, shape: tuple[str, int], level: int) -> None:
+    def seed(self, shape: tuple[str, int] | None, level: int) -> None:
+        self.deepest = max(self.deepest, level)
+        if shape is None:
+            return
         key, dots = shape
         base = max(1, level - (dots - 1)) if key == "decimal" else level
         self.bases.setdefault(key, base)
-        self.deepest = max(self.deepest, level)
 
     def level_for(self, shape: tuple[str, int]) -> int:
         key, dots = shape
@@ -57,17 +63,42 @@ class _Levels:
         return level
 
 
-def _is_candidate(block: pf.Element) -> tuple[str, int] | None:
+def _lead(text: str) -> int | None:
+    m = _LEAD.match(text)
+    return int(m.group(1)) if m else None
+
+
+def _is_candidate(block: pf.Element, section: int | None) -> tuple[str, int] | None:
+    """Shape of a paragraph that reads as a heading: bold and numbered, or ``N.M …`` under ``N.``.
+
+    ``section`` is the number of the ``N.`` heading the paragraph sits under. A number starting
+    with 0 (``0.5 이하``) or shaped like a date (``2026. 10. 21.``) is never a heading.
+    """
     if not isinstance(block, pf.Para):
         return None
     text = _text(block)
     shape = heading_shape(text)
     if shape is None or len(text) > _MAX_TEXT:
         return None
+    if shape[0] == "decimal" and (text.startswith("0") or _DATE.match(text)):
+        return None
     first_strong = bool(block.content) and isinstance(block.content[0], pf.Strong)
-    if first_strong or (shape[0] == "decimal" and shape[1] >= 2):
+    if first_strong:
+        return shape
+    if shape[0] == "decimal" and shape[1] >= 2 and section is not None and _lead(text) == section:
         return shape
     return None
+
+
+def _section(current: tuple[int, int] | None, header: pf.Header) -> tuple[int, int] | None:
+    """(number, level) of the ``N.`` heading in force after ``header``."""
+    text = _text(header)
+    if heading_shape(text) == ("decimal", 1):
+        number = _lead(text)
+        return (number, header.level) if number is not None else None
+    if current is not None and header.level <= current[1]:
+        return None
+    return current
 
 
 def _promote_title(blocks: list[pf.Element], ctx: ImportContext) -> bool:
@@ -97,14 +128,17 @@ def apply(doc: pf.Doc, ctx: ImportContext) -> pf.Doc:
     for block in blocks:
         if isinstance(block, pf.Header):
             _unwrap(block)
-            shape = heading_shape(_text(block))
-            if shape:
-                levels.seed(shape, block.level)
+            levels.seed(heading_shape(_text(block)), block.level)
     promoted = 0
+    section: tuple[int, int] | None = None
     for i, block in enumerate(blocks):
-        shape = _is_candidate(block)
+        if isinstance(block, pf.Header):
+            section = _section(section, block)
+            continue
+        shape = _is_candidate(block, section[0] if section else None)
         if shape:
             blocks[i] = _as_header(block, levels.level_for(shape))
+            section = _section(section, blocks[i])
             promoted += 1
     if _promote_title(blocks, ctx):
         promoted += 1
