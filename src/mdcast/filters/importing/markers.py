@@ -49,16 +49,22 @@ def _number(key: str, token: str) -> int:
     return int(token)
 
 
-def list_marker(text: str) -> tuple[str, str, int | None] | None:
-    """(shape key, "bullet"|"ordered", number) of a list marker prefix, or None."""
+def match_list_marker(text: str) -> tuple[str, str, int | None, re.Pattern[str]] | None:
+    """(shape key, "bullet"|"ordered", number, matching pattern) of a list marker prefix, or None."""
     m = _BULLET.match(text)
     if m:
-        return m.group(1), "bullet", None
+        return m.group(1), "bullet", None, _BULLET
     for key, pattern in _ORDERED:
         m = pattern.match(text)
         if m:
-            return key, "ordered", _number(key, m.group(1))
+            return key, "ordered", _number(key, m.group(1)), pattern
     return None
+
+
+def list_marker(text: str) -> tuple[str, str, int | None] | None:
+    """(shape key, "bullet"|"ordered", number) of a list marker prefix, or None."""
+    found = match_list_marker(text)
+    return found[:3] if found else None
 
 
 def strip_leading_marker(text: str) -> str:
