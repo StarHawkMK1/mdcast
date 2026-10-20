@@ -9,9 +9,9 @@ import pytest
 from docx.enum.text import WD_BREAK
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-
 from docx_builder import add_page_break, add_para, docx_bytes, strip_mdcast_metadata
 from helpers import export, tiny_png, write_template
+
 from mdcast.ast import json_to_doc
 from mdcast.readers.docx_package import PAGEBREAK_SENTINEL, prepare_docx
 from mdcast.types import Format
@@ -161,10 +161,10 @@ def test_other_entries_are_kept_byte_for_byte(tmp_path):
 
 
 def test_malformed_input_raises():
-    with pytest.raises(Exception):
+    with pytest.raises(zipfile.BadZipFile):
         prepare_docx(b"not a zip")
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as z:
         z.writestr("x.txt", "x")
-    with pytest.raises(Exception):
+    with pytest.raises(KeyError):  # no word/document.xml
         prepare_docx(buffer.getvalue())

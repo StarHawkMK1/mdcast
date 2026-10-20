@@ -27,6 +27,6 @@ def to_png(data: bytes, name: str) -> tuple[bytes, str] | None:
                 im.load()
             out = io.BytesIO()
             im.convert("RGBA").save(out, format="PNG")
-    except Exception:
+    except Exception:  # noqa: BLE001 - any undrawable picture is kept as-is, never a failure
         return None
     return out.getvalue(), path.with_suffix(".png").name

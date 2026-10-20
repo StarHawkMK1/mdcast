@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import panflute as pf
-
 from docx_builder import strip_mdcast_metadata
 from helpers import export, write_template
+
 from mdcast.filters.importing import ImportContext, run_import_filters
 from mdcast.readers.docx import read_docx
 from mdcast.report import Codes, Report

@@ -55,7 +55,7 @@ def collect_note_definitions(text: str) -> dict[str, str]:
         if definition:
             current = notes.setdefault(definition.group(1), [])
             current.append(definition.group(2))
-        elif current is not None and (line.startswith("    ") or line.startswith("\t")):
+        elif current is not None and line.startswith(("    ", "\t")):
             current.append(line[4:] if line.startswith("    ") else line[1:])
         elif current is not None and not line.strip():
             current.append("")
@@ -126,7 +126,6 @@ def _decode_image_paths(doc: pf.Doc) -> pf.Doc:
     def action(elem: pf.Element, _doc: pf.Doc):
         if isinstance(elem, pf.Image) and "%20" in elem.url and not _SCHEME.match(elem.url):
             elem.url = elem.url.replace("%20", " ")
-        return None
 
     return doc.walk(action)
 

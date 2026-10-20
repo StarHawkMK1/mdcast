@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
-
 from copy import deepcopy
+from typing import Any
 
 import panflute as pf
 import yaml

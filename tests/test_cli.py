@@ -266,8 +266,8 @@ def test_corrupt_docx_cli_exit_1_no_traceback(env):
 
 def test_asset_outside_assets_folder_is_skipped(env, monkeypatch):
     from mdcast import pipeline
-    from mdcast.types import Format, Output, Result
     from mdcast.report import Report
+    from mdcast.types import Format, Output, Result
 
     def fake(source, targets, template=None, options=None):
         report = Report(source.name, source.format)

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import io
+import zipfile
 
 import panflute as pf
 import pytest
 from docx.shared import Inches
-
 from docx_builder import add_para, docx_bytes
 from helpers import tiny_bmp, tiny_png
+
 from mdcast.readers.docx import read_docx
 from mdcast.report import Report
 from mdcast.types import Format, Source
@@ -92,7 +93,7 @@ def test_frontmatter_and_source_text():
 
 
 def test_corrupt_bytes_raise():
-    with pytest.raises(Exception):
+    with pytest.raises(zipfile.BadZipFile):
         read(b"not a zip")
 
 

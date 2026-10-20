@@ -3,8 +3,8 @@ from __future__ import annotations
 import sys
 
 import pytest
-
 from helpers import tiny_png, tiny_wmf
+
 from mdcast.readers.media import to_png
 
 
