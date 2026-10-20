@@ -112,3 +112,33 @@ def test_comments_are_reported():
 
     _, report = read(docx_bytes(build))
     assert len([e for e in report.events if e.code == "IMPORT_HEADER_SKIPPED"]) == 1
+
+
+def test_colliding_media_names_stay_distinct():
+    import zipfile
+
+    def build(d):
+        d.add_picture(io.BytesIO(tiny_bmp()))
+        d.add_picture(io.BytesIO(tiny_png()))
+
+    src = zipfile.ZipFile(io.BytesIO(docx_bytes(build)))
+    renames = {"word/media/image1.bmp": "word/media/a/pic.bmp", "word/media/image2.png": "word/media/b/pic.png"}
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as target:
+        for info in src.infolist():
+            blob = src.read(info.filename)
+            if info.filename in renames:
+                target.writestr(renames[info.filename], blob)
+                continue
+            if info.filename == "word/_rels/document.xml.rels":
+                text = blob.decode("utf-8")
+                for old, new in renames.items():
+                    text = text.replace(old.removeprefix("word/"), new.removeprefix("word/"))
+                blob = text.encode("utf-8")
+            target.writestr(info, blob)
+    imp, _ = read(out.getvalue())
+    images = []
+    imp.doc.walk(lambda e, _d: images.append(e) if isinstance(e, pf.Image) else None)
+    urls = [i.url for i in images]
+    assert len(set(urls)) == 2 and len(imp.media) == 2
+    assert all(u.split("/", 1)[1] in imp.media for u in urls)

@@ -61,6 +61,15 @@ def _has_description(img: pf.Image) -> bool:
     return bool(pf.stringify(img).strip())
 
 
+def _unique_name(name: str, blob: bytes, taken: dict[str, bytes]) -> str:
+    stem, dot, ext = name.rpartition(".")
+    candidate, n = name, 1
+    while taken.get(candidate, blob) != blob:
+        n += 1
+        candidate = f"{stem}-{n}{dot}{ext}"
+    return candidate
+
+
 def read_docx(source: Source, report: Report, assets_dir: str) -> ImportedDocument:
     prepared = prepare_docx(source.data)
     doc = docx_to_doc(prepared.data)
@@ -74,7 +83,9 @@ def read_docx(source: Source, report: Report, assets_dir: str) -> ImportedDocume
                 **place,
             )
 
-    package = zipfile.ZipFile(io.BytesIO(prepared.data))
+    with zipfile.ZipFile(io.BytesIO(prepared.data)) as package:
+        names = set(package.namelist())
+        blobs = {n: package.read(n) for n in names if n.startswith("word/media/")}
     media: dict[str, bytes] = {}
     urls: dict[str, str] = {}
 
@@ -82,19 +93,20 @@ def read_docx(source: Source, report: Report, assets_dir: str) -> ImportedDocume
         if url in urls:
             return urls[url]
         name = url.rsplit("/", 1)[-1]
-        blob = package.read(f"word/{url}")
+        blob = blobs[f"word/{url}"]
         converted = to_png(blob, name)
         if converted is None:
             report.warn(Codes.IMAGE_CONVERT_FAILED, "그림 형식을 PNG로 바꾸지 못해 원본 그대로 가져옵니다", name=name)
             converted = (blob, name)
-        media[converted[1]] = converted[0]
-        urls[url] = f"{assets_dir}/{converted[1]}"
+        out_name = _unique_name(converted[1], converted[0], media)
+        media[out_name] = converted[0]
+        urls[url] = f"{assets_dir}/{out_name}"
         return urls[url]
 
     def finish(elem: pf.Element, _doc: pf.Doc) -> None:
         if not isinstance(elem, pf.Image):
             return
-        if f"word/{elem.url}" in package.namelist():
+        if f"word/{elem.url}" in blobs:
             elem.url = convert(elem.url)
         if not _has_description(elem):
             elem.content = [pf.Str("그림")]
