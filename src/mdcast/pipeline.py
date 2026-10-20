@@ -96,7 +96,7 @@ def convert(
     outputs = [Output(t, output_name(source.name, t), None) for t in dict.fromkeys(targets)]
 
     if source.format is Format.DOCX:
-        return import_document(source, targets, options)
+        return import_document(source, targets, options, template)
     if source.format is not Format.MD:
         milestone = {Format.HWPX: "M3b", Format.PDF: "M3c"}.get(source.format, "M3")
         report.error(Codes.INPUT_UNSUPPORTED, f"{source.format.value} 입력은 아직 지원하지 않습니다 ({milestone} 예정)")

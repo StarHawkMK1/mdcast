@@ -5,7 +5,7 @@ from docx_builder import strip_mdcast_metadata
 from helpers import export
 
 from mdcast.pipeline import convert
-from mdcast.report import Codes
+from mdcast.report import Codes, Level
 from mdcast.types import Format, Source
 
 SAMPLE = Path(__file__).parent / "fixtures" / "md" / "assets" / "sample.png"
@@ -51,6 +51,11 @@ def test_hwpx_and_pdf_input_still_unsupported():
 def test_template_is_ignored_for_docx(tmp_path):
     res = convert(Source(_docx(tmp_path), "a.docx", Format.DOCX), [Format.MD], template="없는템플릿")
     assert res.outputs[0].data is not None
+    notes = [e for e in res.report.events if "템플릿을 쓰지 않습니다" in e.message]
+    assert [(e.level, e.code) for e in notes] == [(Level.INFO, Codes.RENDER_WARNING)] and "없는템플릿" in notes[0].message
+    assert notes[0] in res.report.events_for(Format.MD)
+    res = convert(Source(_docx(tmp_path), "a.docx", Format.DOCX), [Format.MD])
+    assert not [e for e in res.report.events if "템플릿" in e.message]
 
 
 def test_typed_punctuation_and_math_keep_full_coverage(tmp_path):

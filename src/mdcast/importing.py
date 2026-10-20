@@ -11,11 +11,15 @@ from mdcast.types import Format, Options, Output, Result, Source
 from mdcast.writers.md import write_md
 
 
-def import_document(source: Source, targets: Sequence[Format], options: Options) -> Result:
+def import_document(
+    source: Source, targets: Sequence[Format], options: Options, template: str | None = None
+) -> Result:
     """docx → MD. Only MD is a valid target; the images go along as ``{stem}_assets/{name}``."""
     report = Report(source.name, source.format)
     stem = Path(source.name).stem
     outputs = [Output(t, f"{stem}.{t.value}", None) for t in dict.fromkeys(targets)]
+    if template:
+        report.info(Codes.RENDER_WARNING, f"가져오기에서는 템플릿을 쓰지 않습니다 (지정한 템플릿 '{template}' 무시)")
 
     for output in outputs:
         if output.format is not Format.MD:
