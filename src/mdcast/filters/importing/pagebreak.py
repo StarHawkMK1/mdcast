@@ -9,7 +9,7 @@ from mdcast.readers.docx_package import PAGEBREAK_SENTINEL
 
 def apply(doc: pf.Doc, ctx: ImportContext) -> pf.Doc:
     def replace(elem: pf.Element, _doc: pf.Doc) -> pf.Element | None:
-        if isinstance(elem, pf.Para) and pf.stringify(elem).strip() == PAGEBREAK_SENTINEL:
+        if isinstance(elem, (pf.Para, pf.Plain)) and pf.stringify(elem).strip() == PAGEBREAK_SENTINEL:
             return raw_block("<!-- pagebreak -->", "html")
         return None
 

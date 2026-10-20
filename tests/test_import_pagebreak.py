@@ -26,3 +26,13 @@ def test_sentinel_inside_text_is_left_alone():
     doc = pf.Doc(pf.Para(pf.Str("글 " + PAGEBREAK_SENTINEL)))
     out = run_import_filters(doc, make_ctx())
     assert isinstance(out.content[0], pf.Para)
+
+
+def test_sentinel_plain_in_cell_and_list_item_becomes_marker():
+    sentinel = pf.Plain(pf.Str(PAGEBREAK_SENTINEL))
+    cell = pf.TableCell(sentinel)
+    tbl = pf.Table(pf.TableBody(pf.TableRow(cell)), head=pf.TableHead(), colspec=[("AlignDefault", "ColWidthDefault")])
+    bullets = pf.BulletList(pf.ListItem(pf.Plain(pf.Str(PAGEBREAK_SENTINEL))))
+    out = run_import_filters(pf.Doc(tbl, bullets), make_ctx())
+    blocks = [b for b in out.content[0].content[0].content[0].content[0].content] + list(out.content[1].content[0].content)
+    assert [(b.text, b.format) for b in blocks] == [("<!-- pagebreak -->", "html")] * 2
