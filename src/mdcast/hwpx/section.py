@@ -12,6 +12,7 @@ from lxml import etree
 
 from mdcast.hwpx.header import CharSpec, Header, ParaSpec
 from mdcast.hwpx.look import Notices, Settings, TableLook
+from mdcast.hwpx.picture import picture_element, picture_size
 from mdcast.hwpx.shapes import Shape
 from mdcast.hwpx.table import (
     Slot,
@@ -39,7 +40,6 @@ _OBJECT_POS = {  # tables and pictures sit in the text like a character (appendi
 }
 _ALIGN = {"AlignLeft": "left", "AlignCenter": "center", "AlignRight": "right"}
 _DEGRADED = {
-    "image": "hwpx 이미지는 M2b 에서 지원합니다 — [이미지: 설명] 으로 대신 썼습니다",
     "footnote": "hwpx 각주는 M2b 에서 지원합니다 — 문서 끝에 모아 썼습니다",
     "math": "hwpx 수식은 M4 에서 이미지로 지원합니다 — LaTeX 원문을 썼습니다",
 }
@@ -82,6 +82,7 @@ class Paragraph:
             pageBreak="1" if page_break else "0", columnBreak="0", merged="0",
         )
         self.char = char
+        self.room = 0.0  # mm a picture in this paragraph may take
         self._run: etree._Element | None = None
         self._text: etree._Element | None = None
 
@@ -162,6 +163,7 @@ class SectionWriter:
         self.pictures = pictures
         self.note_format = note_format
         self._objects = itertools.count(1)
+        self._figure_caption: tuple[pf.Image, list[pf.Element]] | None = None
         self.shapes = shapes
         self.settings = settings
         self.notices = notices
@@ -215,6 +217,7 @@ class SectionWriter:
     def paragraph(self, element: str, ctx: Context, para: str | None = None) -> Paragraph:
         shape = self.shapes[element]
         paragraph = Paragraph(para or self._para_id(element, ctx), shape.style, shape.char, self._page_break)
+        paragraph.room = self.available(ctx, element)
         self._page_break = False
         self.paragraphs.append(paragraph)
         return paragraph
@@ -391,13 +394,39 @@ class SectionWriter:
         return caption
 
     def figure(self, figure: pf.Figure, ctx: Context) -> None:
+        """One paragraph aligned per ``figures.align``; a lone picture carries the caption (spec §5.3)."""
         caption = self._caption_blocks(figure.caption)
+        found: list[pf.Image] = []
+        figure.content.walk(lambda e, _d: found.append(e) if isinstance(e, pf.Image) else None)
+        own = len(found) == 1 and found[0].url in self.settings.images and self.pictures is not None
         above = self.settings.figure_caption_above
-        if caption and above:
+        if caption and not own and above:
             self._caption(caption, ctx)
-        self.blocks(figure.content, ctx)
-        if caption and not above:
+        if caption and own:
+            self._figure_caption = (found[0], caption)
+        blocks = list(figure.content)
+        if blocks and isinstance(blocks[0], (pf.Para, pf.Plain)):
+            para = self._para_id(ctx.element, ctx, align=self.settings.figure_align)
+            paragraph = self.paragraph(ctx.element, ctx, para)
+            self.inlines(paragraph, blocks.pop(0).content, self.shapes[ctx.element].char)
+        self.blocks(blocks, ctx)
+        self._figure_caption = None
+        if caption and not own and not above:
             self._caption(caption, ctx)
+
+    def picture(self, paragraph: Paragraph, item: pf.Image, char: str) -> None:
+        image = self.settings.images.get(item.url)
+        alt = clean(pf.stringify(item).strip())
+        if image is None or self.pictures is None:  # the adapter already warned about it
+            paragraph.text(char, f"[이미지: {alt or item.url}]")
+            return
+        width, height = picture_size(image, item.attributes.get("width"), item.attributes.get("height"),
+                                     paragraph.room, self.settings.figure_max_ratio, self.settings.figure_max_mm)
+        caption = None
+        if self._figure_caption is not None and self._figure_caption[0] is item:
+            caption = self.caption_element(self._figure_caption[1], hwpunit(width), self.settings.figure_caption_above)
+        item_id = self.pictures.add(image)
+        paragraph.object(char, picture_element(item_id, image, width, height, alt, next(self._objects), caption))
 
     @staticmethod
     def _caption_blocks(caption: pf.Caption | None) -> list[pf.Element]:
@@ -463,8 +492,7 @@ class SectionWriter:
             self.notices.add("degraded", "math", _DEGRADED["math"])
             paragraph.text(self._code(char), item.text)
         elif isinstance(item, pf.Image):
-            self.notices.add("degraded", "image", _DEGRADED["image"])
-            paragraph.text(char, f"[이미지: {pf.stringify(item).strip() or item.url}]")
+            self.picture(paragraph, item, char)
         elif isinstance(item, pf.Note):
             self.notices.add("degraded", "footnote", _DEGRADED["footnote"])
             self._notes.append(list(item.content))

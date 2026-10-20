@@ -201,6 +201,11 @@ def hwpx_integrity(data: bytes) -> dict:
         assert run.get("charPrIDRef") in chars
     for element in (*section.iter(hp("tbl")), *section.iter(hp("tc"))):
         assert element.get("borderFillIDRef") in fills, element.tag
+    opf = "{http://www.idpf.org/2007/opf/}item"
+    items = {i.get("id"): i.get("href") for i in parts["Contents/content.hpf"].iter(opf)}
+    hc_img = f"{{{HWPX_NS['hc']}}}img"
+    for img in section.iter(hc_img):
+        assert img.get("binaryItemIDRef") in items and items[img.get("binaryItemIDRef")] in archive.namelist()
     begins = {b.get("id") for b in section.iter(hp("fieldBegin"))}
     for end in section.iter(hp("fieldEnd")):
         assert end.get("beginIDRef") in begins
@@ -246,14 +251,18 @@ def hwpx_render(md: str, settings=None, doc=None):
     from mdcast.hwpx.container import Package
     from mdcast.hwpx.header import Header
     from mdcast.hwpx.look import Notices
+    from mdcast.hwpx.picture import Pictures
     from mdcast.hwpx.section import SectionWriter
     from mdcast.hwpx.shapes import build_shapes
 
     settings = settings or hwpx_settings()
-    header = Header(Package.read(builtin_hwpx()).xml("Contents/header.xml"))
+    package = Package.read(builtin_hwpx())
+    header = Header(package.xml("Contents/header.xml"))
     notices = Notices()
     shapes = build_shapes(header, settings, notices)
-    paragraphs = SectionWriter(header, shapes, settings, notices, width=170.0).build(doc or md_to_doc(md))
+    pictures = Pictures(package, package.xml("Contents/content.hpf"))
+    paragraphs = SectionWriter(header, shapes, settings, notices, width=170.0,
+                               pictures=pictures).build(doc or md_to_doc(md))
     return header, shapes, paragraphs, notices
 
 

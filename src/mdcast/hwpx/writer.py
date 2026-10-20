@@ -9,6 +9,7 @@ from mdcast.hwpx.header import Header
 from mdcast.hwpx.look import Notice, Notices, Settings
 from mdcast.hwpx.meta import apply_metadata, keep_first_section, preview_text, reset_caret
 from mdcast.hwpx.page import apply_page, assemble, body_width, find_sec_pr_run
+from mdcast.hwpx.picture import Pictures
 from mdcast.hwpx.section import SectionWriter, hp
 from mdcast.hwpx.shapes import build_shapes
 
@@ -24,7 +25,9 @@ def write(doc: pf.Doc, container: bytes, settings: Settings) -> tuple[bytes, lis
     header.blank_numbering(sec_pr.get("outlineShapeIDRef", "1"))
     shapes = build_shapes(header, settings, notices)
     apply_page(sec_pr, settings.page)  # tables and pictures need the body width (spec 2026-10-20 §3.3)
-    paragraphs = SectionWriter(header, shapes, settings, notices, width=body_width(sec_pr)).build(doc)
+    pictures = Pictures(package, content)
+    paragraphs = SectionWriter(header, shapes, settings, notices, width=body_width(sec_pr),
+                               pictures=pictures).build(doc)
     assemble(section, paragraphs, header, shapes, settings)
     apply_metadata(content, settings.metadata)
     keep_first_section(package, content)
