@@ -47,6 +47,8 @@ M2a 는 hwpx 에서 표·이미지·각주를 글자로 낮춰 썼다 (M2a §5.6
 
 ## 2. 방식: 견본 채취 먼저
 
+**2026-10-20 수행 완료.** 결과는 부록 B 에 있고, §4–§6 에 반영했다.
+
 M2a 와 같다. 한글 COM 으로 기능을 하나씩 넣은 문서를 hwpx 로 저장하고, XML 조각과 `header.xml`·`content.hpf` 변화를 읽는다. 스크립트는 `spikes/m2b_samples/`, 결과는 이 문서의 "부록 B" 에 붙인다. 결과가 이 문서의 가정과 다르면 해당 절을 고친 뒤 구현한다.
 
 | # | 견본 | 확인할 것 |
@@ -105,13 +107,13 @@ M2a §4 의 경계를 지킨다: `src/mdcast/hwpx/` 는 mdcast 의 다른 모듈
 ### 4.2 폭
 
 - 쓸 수 있는 폭 = 지금 위치의 폭: 본문 폭에서 목록·인용 들여쓰기를 뺀 값. 칸 안의 표라면 그 칸의 안쪽 폭.
-- `width: full`: 표 폭 = 쓸 수 있는 폭. 열 너비는 colspec 비율대로 나눈다. 필터가 기본 너비(`ColWidthDefault`)를 이미 1/n 로 바꿔 두므로 대개 같은 너비가 된다.
+- `width: full`: 표 폭 = 쓸 수 있는 폭. 열 너비는 colspec 비율을 합이 1 이 되게 늘려 나눈다 (grid table 은 원문 폭 비율이 와서 합이 1 보다 작다. 예: 0.65). 필터가 기본 너비(`ColWidthDefault`)를 이미 1/n 로 바꿔 두므로 pipe table 은 대개 같은 너비가 된다.
 - `width: auto`: 한글은 열 때 자동 맞춤을 하지 않으므로 mdcast 가 계산한다. colspec 비율이 있으면 비율 × 쓸 수 있는 폭이다. 없으면 열마다 가장 긴 칸 글자의 대략 폭(`text_em`, 표 글자 크기 기준) + 안쪽 여백으로 잡는다. 열 하나는 최소 10mm. 합이 쓸 수 있는 폭을 넘으면 비율대로 줄인다.
 - 병합 칸의 `cellSz width` 는 덮은 열 너비의 합이다. 반올림 때문에 열 너비 합이 표 폭과 어긋나면 마지막 열에서 맞춘다.
 
 ### 4.3 높이
 
-칸 높이에는 최소값(표 글자 크기의 한 줄 높이 + 위아래 안쪽 여백)을 쓰고, 한글이 내용에 맞춰 늘리는 것에 기댄다. B-3 에서 한글이 늘리지 않는다고 나오면, 칸 글자의 대략 폭으로 줄 수를 추정해 높이를 쓰는 방식으로 바꾸고, 이 절을 고친다.
+칸 높이에는 최소값(표 글자 크기의 한 줄 높이 + 위아래 안쪽 여백)을 쓰고, 한글이 내용에 맞춰 늘리는 것에 기댄다. B-3 에서 확인했다: `cellSz height=100` 으로 써도 한글이 행을 내용에 맞춰 늘려 그리고, 다시 저장하면 표 `sz height` 를 새로 계산한다.
 
 ### 4.4 모양 (`tables.*` 설정)
 
@@ -119,12 +121,12 @@ hwpx 표 모양은 docx·pdf 와 같은 템플릿 `tables` 설정을 따른다. 
 
 | 설정 | hwpx 표현 |
 |---|---|
-| `border`, `border_outer` | 한글 테두리는 칸마다 있다. 칸마다 `borderFill` 을 만든다: 표 바깥에 닿는 변은 `border_outer`, 안쪽 변은 `border`. 굵기는 한글이 받는 가장 가까운 값으로 반올림한다 (B-4, 알리지 않음). 같은 조합은 `borderFill` 하나를 함께 쓴다 |
+| `border`, `border_outer` | 한글 테두리는 칸마다 있다. 칸마다 `borderFill` 을 만든다: 표 바깥에 닿는 변은 `border_outer`, 안쪽 변은 `border`. 굵기는 pt 를 mm 로 바꿔 한글 굵기 목록(B-4)에서 가장 가까운 값을 쓴다 (같은 거리면 굵은 쪽, 알리지 않음). 0.5pt → `0.2 mm`, 1pt → `0.4 mm`, 0.34pt → `0.12 mm`. 같은 조합은 `borderFill` 하나를 함께 쓴다 |
 | `header.background` / `body.zebra` / `first_column.background` | 칸 배경. 겹치면 머리행 > 첫 열 > 줄무늬 순 (Word 의 조건부 서식 우선순위와 같음). 줄무늬는 본문 짝수 행 |
 | `header.repeat` | 머리행 칸 `header="1"`, 표 `repeatHeader="1"`. 표 쪽 넘김은 칸 단위(`pageBreak="CELL"`, 예시 문서와 같음) |
 | `header.bold`, `header.align`, `first_column.bold`, colspec 정렬 | 필터가 모든 형식에 이미 적용한다 (굵게는 `Strong`, 정렬은 칸·열 정렬). hwpx 는 칸 정렬을 칸 문단 정렬로 쓴다 |
 | `header.valign`, `body.valign` | `subList vertAlign` (`top`·`middle`·`bottom` → `TOP`·`CENTER`·`BOTTOM`) |
-| `cell_padding` | 칸 안쪽 여백 네 변 (B-6 의 결과대로 `inMargin` 또는 `cellMargin`) |
+| `cell_padding` | 칸 안쪽 여백 네 변: 표 `inMargin` 네 변 = 여백, 칸마다 `cellMargin` 도 같은 값, `hasMargin="0"` (B-6) |
 | `font_size`, `line_height` | 칸 문단의 글자 크기와 줄 간격. 칸 문단의 앞뒤 간격은 0 (docx 내장 그릇과 같음) |
 
 - `body.head` 행 (pandoc 의 본문 중간 머리행. MD 표 문법으로는 생기지 않는다)과 `table.foot` 행은 본문 행 모양이다. 필터가 머리행 굵게·정렬을 `table.head` 에만 넣으므로 그와 맞춘다.
@@ -137,31 +139,29 @@ hwpx 표 모양은 docx·pdf 와 같은 템플릿 `tables` 설정을 따른다. 
 - 칸의 블록은 SectionWriter 로 만든 문단이 `subList` 에 들어간다. 글자 크기·줄 간격은 §4.4 의 표 값, 그 밖의 글자·문단 모양은 본문 모양에서 시작한다.
 - 목록·인용·코드는 칸 안에서 같은 규칙으로 들여 쓴다 (기준은 칸의 왼쪽 안쪽).
 - 칸 안 이미지는 칸 안쪽 폭을 최대 폭으로 쓴다 (§5.2).
-- 칸 안 표는 칸 안쪽 폭을 쓸 수 있는 폭으로 하는 중첩 표다. B-13 에서 한글이 받지 않는 것으로 나오면 중첩 표만 M2a 방식(행마다 문단)으로 낮추고 알린다.
+- 칸 안 표는 칸 안쪽 폭을 쓸 수 있는 폭으로 하는 중첩 표다 (B-13 에서 한글이 받음을 확인).
 - 칸 안의 쪽 나눔 표시는 무시한다.
 
 ### 4.6 캡션
 
-캡션 글자는 지금처럼 번호 필터가 `<표 {n}> {text}` 형식으로 만들어 둔다. hwpx 에서 담는 방식은 B-8 결과로 정한다:
-- 한글 캡션(`hp:caption`)에 자동 번호 없이 글자만 넣을 수 있으면 그것을 쓴다 (캡션이 표와 같은 쪽에 붙고 한글의 차례 기능과 맞는다). 위치는 `tables.caption.position`.
-- 그렇지 않으면 M2a 처럼 따로 된 캡션 문단을 쓰고, 위에 오는 캡션은 다음 문단과 같은 쪽에 두기를 켠다.
+캡션 글자는 지금처럼 번호 필터가 `<표 {n}> {text}` 형식으로 만들어 둔다. hwpx 에서는 **한글 캡션(`hp:caption`)** 에 자동 번호 없이 그 글자만 넣는다 (B-8 에서 확인: 자동 번호 없는 캡션이 표·그림에 붙어 그려진다). 캡션이 개체와 함께 움직인다. 위치는 `tables.caption.position` (`above` → `TOP`, `below` → `BOTTOM`). 캡션 문단은 `caption` 요소의 모양·스타일이다.
 
-그림 캡션도 같은 방식이다 (`figures.caption.position`).
+그림 캡션도 같은 방식이다 (`figures.caption.position`). 캡션을 잃은 경우(행·열이 없는 표)에는 캡션 문단만 쓴다.
 
 ## 5. 이미지
 
 ### 5.1 읽기
 
 - 어댑터가 문서의 이미지를 docx·pdf 와 같은 규칙으로 읽는다: `writers/images.py` 의 로컬·원격 읽기, `--offline`, 시간 제한, 20MB 상한. 읽은 바이트는 `settings.images` 로 넘긴다. 파일로 쓸지(`localize_images` 재사용) 메모리로만 들고 있을지는 구현자가 정한다.
-- 형식은 바이트로 판별한다. 지금 `_extension()` 에는 BMP 판별이 없으므로 더한다 (PDF 의 strict 허용 목록과 오류 문구는 그대로 둔다). hwpx 허용 목록은 B-11 결과로 정한다.
-- 한글이 보여 주지 못하는 형식(B-11 결과. WebP·SVG 가 해당할 수 있다)은 **PNG 로 바꿔 넣는다.** 바꾸는 데는 이미 실행 의존성인 typst 를 쓴다 (그림 하나만 든 쪽을 그림 크기로 만들어 PNG 로 내보낸다. 해상도는 구현자가 정하되 화면에서 흐리지 않게). M4 의 다이어그램이 SVG 로 나올 것이므로, 자리표시로 두면 hwpx 에서만 그림이 사라진다.
+- 형식은 바이트로 판별한다. 지금 `_extension()` 에는 BMP 판별이 없으므로 더한다 (PDF 의 strict 허용 목록과 오류 문구는 그대로 둔다). hwpx 가 그대로 넣는 형식은 PNG·JPEG·GIF·BMP·SVG 다 (B-11).
+- 한글이 보여 주지 못하는 형식은 **PNG 로 바꿔 넣는다.** B-11 결과 WebP 만 해당한다 (PNG·JPEG·GIF·BMP·SVG 는 그대로 넣는다). 바꾸는 데는 이미 실행 의존성인 typst 를 쓴다 (그림 하나만 든 쪽을 그림 크기로 만들어 PNG 로 내보낸다. 해상도는 구현자가 정하되 화면에서 흐리지 않게). 자리표시로 두면 docx·pdf 에서는 보이는 그림이 hwpx 에서만 사라진다.
 - 읽지 못하거나 손상되었거나 PNG 로 바꾸지 못한 그림은 docx·pdf 와 같이 `[이미지: 설명]` 자리표시로 바꾸고 `IMAGE_FETCH_FAILED` 를 알린다. 그림을 잃은 그림 블록은 캡션 글자를 남긴 문단이 된다 (기존 `localize_images` 동작과 같음).
 - M2a 의 "이미지는 M2b 에서 지원" 알림은 없앤다.
-- 픽셀 크기와 DPI 는 PNG(`IHDR`, `pHYs`)·JPEG(SOF, JFIF 밀도)·GIF·BMP 머리에서 읽는다. 실행 의존성에 Pillow 가 없으므로 직접 읽는다 (어댑터 쪽 `writers/images.py`). DPI 정보가 없으면 96 으로 본다. PNG 로 바꾼 그림은 바꾼 결과에서 읽는다. 크기를 읽지 못한 그림은 자리표시로 바꾼다.
+- 픽셀 크기와 DPI 는 PNG(`IHDR`, `pHYs`)·JPEG(SOF, JFIF 밀도)·GIF·BMP·WebP 머리에서 읽는다. SVG 는 루트의 `width`·`height` (단위 없음·`px` 는 px, `pt`·`mm`·`cm`·`in` 은 96dpi 로 환산), 없으면 `viewBox` 의 폭·높이, 그것도 없으면 300×150 (브라우저 기본값)으로 본다. 실행 의존성에 Pillow 가 없으므로 직접 읽는다 (어댑터 쪽 `writers/images.py`). DPI 정보가 없으면 96 으로 본다. PNG 로 바꾼 그림은 바꾼 결과에서 읽는다. 크기를 읽지 못한 그림은 자리표시로 바꾼다.
 
 ### 5.2 크기
 
-1. 원래 크기 = 픽셀 ÷ DPI.
+1. 원래 크기 = 픽셀 ÷ DPI. (한글은 그림을 넣을 때 DPI 를 무시한다(B-9). mdcast 는 docx·pdf 와 같은 크기가 되도록 DPI 를 쓴다.)
 2. pandoc 크기 속성 (`width`·`height`: `%`, `mm`, `cm`, `in`, `px`, 단위 없는 값은 px)이 있으면 그것을 쓴다. `%` 는 쓸 수 있는 폭에 대한 비율이다. 하나만 있으면 가로세로 비율을 지킨다.
 3. 상한 = `figures.max_width` 가 비율이면 비율 × 쓸 수 있는 폭, 길이면 그 길이와 쓸 수 있는 폭 중 작은 값. 폭이 상한을 넘으면 비율을 지켜 줄인다. 이 상한은 인라인 이미지에도 적용한다 (쪽 밖으로 나가지 않게).
 4. 쓸 수 있는 폭은 §4.2 와 같다 (칸 안이면 칸 안쪽 폭).
@@ -175,22 +175,22 @@ hwpx 표 모양은 docx·pdf 와 같은 템플릿 `tables` 설정을 따른다. 
 ### 5.4 패키지 등록
 
 - 그림 파일은 `BinData/` 아래에 그릇의 기존 항목과 겹치지 않는 이름으로 넣고 (deflate 압축), `content.hpf` manifest 에 `isEmbeded="1"` 항목을 더한다 (예시 문서와 같음, B-9 로 재확인).
-- 같은 바이트의 그림이 여러 번 나오면 B-14 가 허락하는 경우 파일 하나를 함께 참조한다.
+- 같은 바이트의 그림이 여러 번 나오면 파일 하나를 함께 참조한다 (B-14 에서 한글 자신이 그렇게 저장함을 확인).
 - 그릇에 원래 있던 BinData(머리말 로고 등)는 그대로 둔다.
 
 ## 6. 각주
 
 - pandoc `Note` 를 한글 각주 개체로 만든다. 번호는 한글이 매기고, 번호 모양·구분선·위치는 그릇의 `footNotePr` 를 따른다 (내장 그릇은 한글 기본값).
 - 각주 내용의 블록은 SectionWriter 로 만든 문단이 각주 안에 들어간다. 모양은 `footnote` 요소의 모양과 스타일(기본 "각주")이다. 목록·코드도 같은 규칙.
-- 칸 안 각주는 B-12 에서 한글이 받으면 각주로 만든다.
-- 각주 안의 표·그림도 B-12 에서 한글이 받으면 개체로 만들고, 받지 않으면 표는 M2a 방식(행마다 문단), 그림은 자리표시로 낮추고 알린다. (각주 안 표는 docx 용 표 기록에서 빠진다(`_in_footnote`). hwpx 는 그 기록을 쓰지 않고 표 속성의 `mdcast-variant` 를 읽으므로 상관없다.)
-- 한글이 각주를 담지 못하는 자리(각주 안 각주 등, B-12)에서는 거부하지 않는다. 그 각주만 M2a 방식으로 낮춘다: 본문에 `[주 n]`, 문서 끝에 `[주 n] 내용` 문단. `n` 은 낮춘 각주끼리 따로 센다 (한글 각주 번호 1, 2, 3 과 겹쳐 보이지 않게 `주` 를 붙인다). 처음 한 번 `RENDER_WARNING` 으로 알린다.
+- 칸 안 각주는 각주로 만든다 (B-12 확인).
+- 각주 안의 표·그림도 개체로 만든다 (각주 안 표는 B-12 에서 확인. 그림은 같은 `hp:pic` 이므로 §8.3 한글 테스트로 확인한다). (각주 안 표는 docx 용 표 기록에서 빠진다(`_in_footnote`). hwpx 는 그 기록을 쓰지 않고 표 속성의 `mdcast-variant` 를 읽으므로 상관없다.)
+- 한글이 각주를 담지 못하는 자리(각주 안 각주: B-12 에서 한글이 거부. 캡션 안 각주: 확인하지 않았으므로 같이 낮춘다)에서는 거부하지 않는다. 그 각주만 M2a 방식으로 낮춘다: 본문에 `[주 n]`, 문서 끝에 `[주 n] 내용` 문단. `n` 은 낮춘 각주끼리 따로 센다 (한글 각주 번호 1, 2, 3 과 겹쳐 보이지 않게 `주` 를 붙인다). 처음 한 번 `RENDER_WARNING` 으로 알린다.
 - M2a 의 "각주는 M2b 에서 지원" 알림은 없앤다.
 
 ## 7. 알림
 
 - `_DEGRADED` 의 table·image·footnote 항목은 없앤다. math 는 남긴다 (M4).
-- 새로 낮춰 쓰는 경우(중첩 표를 못 만들 때, 각주를 못 담을 때)는 M2a 와 같이 종류마다 문서당 한 번 `RENDER_WARNING`(`format=hwpx`, `element=<종류>`)으로 알린다.
+- 새로 낮춰 쓰는 경우(각주를 못 담을 때)는 M2a 와 같이 종류마다 문서당 한 번 `RENDER_WARNING`(`format=hwpx`, `element=<종류>`)으로 알린다.
 - 이미지 실패는 docx·pdf 와 같은 `IMAGE_FETCH_FAILED` 다.
 - 테두리 굵기 반올림, 열 너비 보정, 빈 칸 채우기는 알리지 않는다.
 
@@ -246,6 +246,140 @@ M2a §8.3 에 더한다. 새 픽스처와 kitchen-sink 에 대해:
 - `width: auto` 의 최소 열 폭 같은 세부 수치를 견본 결과에 맞춰 조정하는 것 (§4.2).
 - 견본 결과가 이 문서와 다르면 해당 절을 고치는 것. 다만 §1 의 범위·반목표를 바꾸는 변경이면 사용자에게 먼저 묻는다.
 
-## 부록 B. 견본 채취 결과
+## 부록 B. 견본 채취 결과 (2026-10-20, 한글 2020 11.0.0.4011)
 
-(구현 첫 작업에서 채운다.)
+스크립트: `spikes/m2b_samples/` (`capture.py` 한글 동작으로 저장, `author.py`·`author2.py`·`author3.py` 손으로 쓴 변형, `judge.py` 한글로 열고 PDF·재저장, `show.py` XML 요약). 손으로 쓴 변형은 내장 그릇 위에 `linesegarray` 없이 썼고, 모두 한글에서 오류·복구 안내 없이 열렸다 (`Open → True`). PDF 를 그림으로 바꿔 눈으로 확인했다.
+
+### B-1 표
+
+```xml
+<hp:run charPrIDRef="…"><hp:tbl id="N" zOrder="N" numberingType="TABLE" textWrap="TOP_AND_BOTTOM"
+    textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="CELL" repeatHeader="1"
+    rowCnt="R" colCnt="C" cellSpacing="0" borderFillIDRef="<테두리 없는 fill>" noAdjust="0">
+  <hp:sz width="<표 폭>" widthRelTo="ABSOLUTE" height="<행 최소 높이 합>" heightRelTo="ABSOLUTE" protect="0"/>
+  <hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0"
+      vertRelTo="PARA" horzRelTo="PARA" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/>
+  <hp:outMargin left="0" right="0" top="0" bottom="0"/>
+  <hp:caption …/>                       <!-- 있을 때만, inMargin 앞 (B-8) -->
+  <hp:inMargin left="P" right="P" top="P" bottom="P"/>
+  <hp:tr>
+    <hp:tc name="" header="0|1" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="…">
+      <hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP|CENTER|BOTTOM"
+          linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0">
+        <hp:p …>…</hp:p>
+      </hp:subList>
+      <hp:cellAddr colAddr="c" rowAddr="r"/><hp:cellSpan colSpan="1" rowSpan="1"/>
+      <hp:cellSz width="…" height="…"/><hp:cellMargin left="P" right="P" top="P" bottom="P"/>
+    </hp:tc>
+  </hp:tr>
+</hp:tbl><hp:t/></hp:run>
+```
+
+- 표는 문단의 run 안에 들어가고 뒤에 빈 `<hp:t/>` 가 온다 (그림도 같다).
+- 한글이 COM 으로 만든 표는 `treatAsChar="0"`, `outMargin` 283 이지만, 사용자 예시 문서처럼 `treatAsChar="1"`, `horzRelTo="PARA"`, `outMargin` 0 으로 써도 본문 폭에 맞게 그려진다.
+- `id`·`zOrder`·`instId` 를 모두 0 으로 써도 열렸다. 구현은 문서 안에서 겹치지 않는 번호를 쓴다.
+
+### B-2 병합
+
+가려진 자리는 `hp:tc` 를 쓰지 않는다. 병합 칸의 `cellSz width` 는 덮은 열의 합이다. 3×3 표에서 (0,0) rowSpan 2, (1,0) colSpan 2 → 칸 7개로 열렸다.
+
+### B-3 칸 높이
+
+`cellSz height="100"` (내용보다 훨씬 작음)으로 써도 한글이 행 높이를 내용에 맞춰 늘려 그린다. 재저장하면 칸 `height` 는 100 그대로, 표 `sz height` 만 새로 계산된다.
+
+### B-4 테두리 굵기
+
+한글이 그대로 받는 굵기 (문자열 그대로): `0.1 mm`, `0.12 mm`, `0.15 mm`, `0.2 mm`, `0.25 mm`, `0.3 mm`, `0.4 mm`, `0.5 mm`, `0.6 mm`, `0.7 mm`, `1.0 mm`, `1.5 mm`, `2.0 mm`, `3.0 mm`, `4.0 mm`, `5.0 mm`. 목록 밖의 값은 다르게 읽힌다 (`0.18 mm` → 0.15, `0.35 mm` → 0.25, `1 mm` 도 목록 값이 아니다). 칸마다 변별로 다른 굵기를 준 `borderFill` (바깥 0.4, 안쪽 0.12)이 그대로 그려진다.
+
+```xml
+<hh:borderFill id="…" threeD="0" shadow="0" centerLine="NONE" breakCellSeparateLine="0">
+  <hh:slash type="NONE" Crooked="0" isCounter="0"/><hh:backSlash type="NONE" Crooked="0" isCounter="0"/>
+  <hh:leftBorder type="SOLID" width="0.4 mm" color="#000000"/> … right, top, bottom …
+  <hh:diagonal type="SOLID" width="0.1 mm" color="#000000"/>
+  <hc:fillBrush><hc:winBrush faceColor="#F2F2F2" hatchColor="#999999" alpha="0"/></hc:fillBrush>  <!-- 배경 있을 때만 -->
+</hh:borderFill>
+```
+
+### B-5 머리행·쪽 넘김
+
+`header="1"` 칸 + `repeatHeader="1"` + `pageBreak="CELL"`: 80행 표가 2쪽으로 나뉘고 2쪽 맨 위에 머리행이 다시 나온다. 머리행 배경은 칸 `borderFill` 의 `fillBrush`.
+
+### B-6 칸 안쪽 여백
+
+표 `inMargin` 네 변을 P 로, 칸 `cellMargin` 도 P, `hasMargin="0"` 으로 쓰면 여백이 적용된다 (한 줄 표의 높이: P=141 → 1282, 425 → 1850, 850 → 2700, 늘어난 양 = 2×(P−141)). 1mm = 283.46 HWPUNIT.
+
+### B-7 세로 정렬
+
+`subList vertAlign="CENTER"` 인 칸의 글자가 행 가운데에 온다 (여러 줄 칸 옆의 한 줄 칸에서 확인).
+
+### B-8 캡션
+
+```xml
+<hp:caption side="TOP|BOTTOM" fullSz="0" width="8504" gap="850" lastWidth="<개체 폭>">
+  <hp:subList … vertAlign="TOP" …><hp:p paraPrIDRef="<캡션>" styleIDRef="<캡션>" …>…</hp:p></hp:subList>
+</hp:caption>
+```
+
+한글은 캡션 문단에 `autoNum`(`numType="TABLE"|"PICTURE"`)을 넣지만, 빼고 글자만 넣어도 표 위·아래와 그림 아래에 그려진다. 표에서는 `outMargin` 다음·`inMargin` 앞, 그림에서는 `outMargin` 다음·`shapeComment` 앞에 둔다.
+
+### B-9 그림
+
+```xml
+<hp:pic id="N" zOrder="N" numberingType="PICTURE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0"
+    dropcapstyle="None" href="" groupLevel="0" instid="N" reverse="0">
+  <hp:offset x="0" y="0"/><hp:orgSz width="OW" height="OH"/><hp:curSz width="W" height="H"/>
+  <hp:flip horizontal="0" vertical="0"/>
+  <hp:rotationInfo angle="0" centerX="W/2" centerY="H/2" rotateimage="1"/>
+  <hp:renderingInfo><hc:transMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/>
+    <hc:scaMatrix e1="W/OW" e2="0" e3="0" e4="0" e5="H/OH" e6="0"/>
+    <hc:rotMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/></hp:renderingInfo>
+  <hp:imgRect><hc:pt0 x="0" y="0"/><hc:pt1 x="OW" y="0"/><hc:pt2 x="OW" y="OH"/><hc:pt3 x="0" y="OH"/></hp:imgRect>
+  <hp:imgClip left="0" right="DW" top="0" bottom="DH"/><hp:inMargin left="0" right="0" top="0" bottom="0"/>
+  <hp:imgDim dimwidth="DW" dimheight="DH"/>
+  <hc:img binaryItemIDRef="<manifest id>" bright="0" contrast="0" effect="REAL_PIC" alpha="0"/><hp:effects/>
+  <hp:sz width="W" widthRelTo="ABSOLUTE" height="H" heightRelTo="ABSOLUTE" protect="0"/>
+  <hp:pos treatAsChar="1" … vertRelTo="PARA" horzRelTo="PARA" vertAlign="TOP" horzAlign="LEFT" …/>
+  <hp:outMargin left="0" right="0" top="0" bottom="0"/>
+  <hp:caption …/>   <!-- 있을 때만 -->
+  <hp:shapeComment>대체 문구</hp:shapeComment>
+</hp:pic>
+```
+
+- 한글이 넣은 그림의 값 (400×200px): 비트맵은 `orgSz` = px × 93.75, `imgDim` = px × 75. SVG 는 `orgSz` = px × 75, `imgDim` = px × 60. 한글은 DPI 를 무시한다 (96·300dpi·DPI 없음 모두 같은 값).
+- W·H(표시 크기)는 mdcast 가 정하고 `curSz`·`sz` 에 같이 쓴다. 이 공식으로 쓴 원래 크기·절반 크기·칸 안 그림이 모두 바르게 그려졌다.
+- 그림 파일: `BinData/<이름>` (deflate), `content.hpf` manifest 에 `<opf:item id="<이름에서 확장자 뺀 것>" href="BinData/<이름>" media-type="…" isEmbeded="1"/>`. `header.xml` 에는 아무것도 더하지 않는다. `mdcast1.png` 같은 이름도 열렸다.
+- media-type: `image/png`, `image/jpg` (jpeg 아님), `image/gif`, `image/bmp`, `image/svg`.
+
+### B-10 칸 안 그림
+
+2×2 표의 윗줄 칸에 그림(칸 안쪽 폭에 맞춤), 아랫줄에 설명 — 예시 문서와 같은 배치가 그려졌다.
+
+### B-11 형식
+
+`InsertPicture` 결과: PNG·JPEG·GIF·BMP·SVG 는 들어가고 **WebP 는 실패**한다.
+
+### B-12 각주
+
+```xml
+<hp:run …><hp:t>본문</hp:t><hp:ctrl><hp:footNote number="n" suffixChar="41" instId="N">
+  <hp:subList … vertAlign="TOP" …>
+    <hp:p paraPrIDRef="<각주>" styleIDRef="<각주>" …><hp:run charPrIDRef="<각주>">
+      <hp:ctrl><hp:autoNum num="n" numType="FOOTNOTE"><hp:autoNumFormat type="DIGIT" userChar=""
+          prefixChar="" suffixChar=")" supscript="0"/></hp:autoNum></hp:ctrl><hp:t> 내용</hp:t>
+    </hp:run></hp:p>
+    <hp:p …>둘째 문단</hp:p>
+  </hp:subList>
+</hp:footNote></hp:ctrl><hp:t>뒤 글자</hp:t></hp:run>
+```
+
+- 번호 모양(`autoNumFormat`)은 그릇 `secPr/footNotePr/autoNumFormat` 과 같다 (내장 그릇: DIGIT, 뒤 `)`).
+- 칸 안 각주, 각주 안 표: 한글이 만들고 다시 연다. 손으로 쓴 본문·칸 안 각주도 열리고 쪽 아래에 `1)`, `2)`, `3)` 으로 그려졌다.
+- 각주 안 각주: 한글이 `InsertFootnote` 를 거부한다 (§6 의 낮춰 쓰기 대상).
+
+### B-13 중첩 표
+
+칸 안 문단의 run 에 `hp:tbl` 을 그대로 넣는다. 한글이 만들고 다시 연다.
+
+### B-14 같은 그림 두 번
+
+한글은 같은 파일을 두 번 넣으면 BinData 하나를 두 `hp:pic` 이 참조하게 저장한다. 손으로 쓴 같은 구조도 열렸다.
