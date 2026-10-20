@@ -75,3 +75,23 @@ def test_pandoc_failure_without_frontmatter_still_raises(monkeypatch):
     monkeypatch.setattr(md_module, "md_to_doc", fail)
     with pytest.raises(RuntimeError):
         read(b"# a\n")
+
+
+def test_footnote_inside_html_table_cell_becomes_note():
+    md = ("본문[^a].\n\n"
+          '<table><tr><td rowspan="2">칸[^t1] 끝</td><td>b</td></tr><tr><td>c</td></tr></table>\n\n'
+          "[^t1]: 칸 각주.\n\n    둘째 문단.\n[^a]: 본문 각주.\n")
+    doc = read_md(Source(md.encode(), "t.md", Format.MD), Report("t.md", Format.MD)).doc
+    notes = []
+    doc.walk(lambda e, d: notes.append(pf.stringify(e).strip()) if isinstance(e, pf.Note) else None)
+    assert "본문 각주." in notes
+    assert any(n.startswith("칸 각주.") and "둘째 문단." in n for n in notes)
+    table = next(b for b in doc.content if isinstance(b, pf.Table))
+    assert "[^t1]" not in pf.stringify(table)
+    assert "칸" in pf.stringify(table) and "끝" in pf.stringify(table)
+
+
+def test_unknown_label_in_cell_stays_text():
+    md = "<table><tr><td>x[^nope]</td></tr></table>\n"
+    doc = read_md(Source(md.encode(), "t.md", Format.MD), Report("t.md", Format.MD)).doc
+    assert "[^nope]" in pf.stringify(doc)
