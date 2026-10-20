@@ -3,3 +3,8 @@
 !graft/
 graft/.cache/
 graft/.graph/
+
+# docs/ is gitignored (private repo) but should stay searchable; archive and decisions stay out.
+!docs/
+docs/workbench/archive/
+docs/decisions/

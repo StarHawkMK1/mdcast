@@ -26,3 +26,6 @@ Thumbs.db
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+
+# Working docs live in a separate private repo cloned into docs/.
+docs/

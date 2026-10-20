@@ -65,5 +65,3 @@ Markdown ↔ docx · hwpx · pdf, 템플릿 기반 변환기. (M1: MD → docx, 
 ## M2a 에서 미룬 항목
 
 - 표·이미지·각주 (M2b), 한글 고유 번호 목록, 문서 안 링크 책갈피, 다른 한글 버전 그릇 시험
-
-설계: `docs/superpowers/specs/2026-10-15-mdcast-design.md`, hwpx: `docs/superpowers/specs/2026-10-16-mdcast-m2a-hwpx-design.md`

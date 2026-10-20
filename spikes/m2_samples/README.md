@@ -1,6 +1,5 @@
 # M2a hwpx 견본 채취 (버리는 코드)
 
-설계: `docs/superpowers/specs/2026-10-16-mdcast-m2a-hwpx-design.md` §3, 부록 A.
 Windows + 한글 + pywin32 가 필요하다. 실행마다 한글의 "접근 허용" 대화상자가 뜰 수 있다.
 
     uv run python spikes/m2_samples/capture.py <out>                       # 한글 동작으로 견본 저장
