@@ -6,10 +6,14 @@ Every count is computed into plain ints first so a failure message shows numbers
 
 from __future__ import annotations
 
+import contextlib
+import logging
 import os
 import re
 import sys
 import tempfile
+import warnings
+from collections.abc import Iterator
 from pathlib import Path
 
 import panflute as pf
@@ -100,10 +104,31 @@ def _measure(data: bytes) -> dict[str, int]:
     return counts
 
 
+@contextlib.contextmanager
+def _quiet() -> Iterator[None]:
+    """No log record or warning while the corpus is processed.
+
+    pypandoc sends pandoc's stderr to its logger (a stderr handler, propagating to pytest's log
+    capture), and pandoc warnings can quote source text ("Could not convert TeX math …").
+    """
+    pandoc_log = logging.getLogger("pypandoc")
+    was_disabled, was_level = pandoc_log.disabled, logging.root.manager.disable
+    pandoc_log.disabled = True
+    logging.disable(logging.CRITICAL)  # any other logger on the path (Pillow, …)
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            yield
+    finally:
+        logging.disable(was_level)
+        pandoc_log.disabled = was_disabled
+
+
 def test_corpus_document_numbers():
     data = _corpus_file().read_bytes()
     try:
-        counts = _measure(data)
+        with _quiet():
+            counts = _measure(data)
     except Exception as exc:  # noqa: BLE001 - keep document text out of the failure message
         raise AssertionError(f"corpus import raised {type(exc).__name__}") from None
     windows = sys.platform == "win32"
