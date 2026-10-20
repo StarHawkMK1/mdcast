@@ -58,10 +58,10 @@ Markdown ↔ docx · hwpx · pdf, 템플릿 기반 변환기. (M1: MD → docx, 
 ## M1 에서 미룬 항목
 
 - 머리말/꼬리말 `logo`, PDF 셀 세로 정렬, docx 캡션 위치(pandoc 기본), 표 셀 안의 중첩 표
-- `figures.max_width` / `figures.align` 은 검증만 하고 writer 에 아직 적용하지 않음
+- `figures.max_width` / `figures.align` 을 pdf writer 에 아직 적용하지 않음 (docx·hwpx 는 적용)
 - typst 컴파일 타임아웃 없음 (spec §5.5 의 60 초 제한은 M4 로 이월)
 - 코어가 로컬 이미지를 `base_dir`/cwd 기준으로 읽음 (로컬 모드 전용, 원격 모드 하드닝은 이월)
 
 ## M2a 에서 미룬 항목
 
-- 표·이미지·각주 (M2b), 한글 고유 번호 목록, 문서 안 링크 책갈피, 다른 한글 버전 그릇 시험
+- 한글 고유 번호 목록, 문서 안 링크 책갈피, 다른 한글 버전 그릇 시험
