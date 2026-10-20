@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -50,3 +51,10 @@ def convert_doc(
 
 def pandoc_version() -> str:
     return pypandoc.get_pandoc_version()
+
+
+def docx_to_doc(data: bytes) -> pf.Doc:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "in.docx"
+        path.write_bytes(data)
+        return json_to_doc(pypandoc.convert_file(str(path), "json", format="docx"))

@@ -56,6 +56,20 @@ def tiny_bmp() -> bytes:
     return buffer.getvalue()
 
 
+def tiny_wmf() -> bytes:
+    """A placeable WMF with an empty drawing: 22-byte header, METAHEADER, EOF record."""
+    header = struct.pack("<IHhhhhHIH", 0x9AC6CDD7, 0, 0, 0, 100, 100, 1440, 0, 0)
+    checksum = 0
+    for (word,) in struct.iter_unpack("<H", header[:20]):
+        checksum ^= word
+    header = header[:20] + struct.pack("<H", checksum)
+    meta = struct.pack("<HHHIHIH", 1, 9, 0x0300, 0, 0, 3, 0)
+    eof = struct.pack("<IH", 3, 0)
+    total_words = (len(meta) + len(eof)) // 2
+    meta = meta[:6] + struct.pack("<I", total_words) + meta[10:]
+    return header + meta + eof
+
+
 def tiny_webp() -> bytes:
     from PIL import Image
 
