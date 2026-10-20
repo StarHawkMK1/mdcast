@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import itertools
 import re
-import unicodedata
 from dataclasses import dataclass, replace
 
 import panflute as pf
@@ -13,6 +12,7 @@ from lxml import etree
 from mdcast.hwpx.header import CharSpec, Header, ParaSpec
 from mdcast.hwpx.look import Notices, Settings
 from mdcast.hwpx.shapes import Shape
+from mdcast.hwpx.table import text_em
 
 HP = "http://www.hancom.co.kr/hwpml/2011/paragraph"
 PAGE_BREAK = ("mdcast-hwpx", "pagebreak")  # raw block the pagebreak filter writes for hwpx
@@ -45,11 +45,6 @@ def append_text(t: etree._Element, text: str) -> None:
         t[-1].tail = (t[-1].tail or "") + text
     else:
         t.text = (t.text or "") + text
-
-
-def text_em(text: str) -> float:
-    """Rough rendered width in em, as the docx writer estimates list markers."""
-    return sum(1.0 if unicodedata.east_asian_width(ch) in ("W", "F", "A") else 0.55 for ch in text)
 
 
 def hanging_mm(markers: list[str], size_pt: float) -> float:
