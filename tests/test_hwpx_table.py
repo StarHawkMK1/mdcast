@@ -132,6 +132,19 @@ def test_caption_is_a_hangul_caption_without_autonum():
     assert p.find(".//hp:autoNum", NS) is None and "요약" in "".join(p.itertext())
 
 
+@pytest.mark.parametrize("above", [True, False])
+def test_caption_wider_than_a_narrow_table_is_a_paragraph_of_its_own(above):
+    # Hangul draws a table's caption only as wide as the table (appendix B-8)
+    md = "Table: <표 1> 좁은 표에 붙은 긴 캡션\n\n| a |\n|---|\n| 1 |\n"
+    settings = hwpx_settings(tables={None: TableLook(width="auto")}, table_caption_above=above)
+    _, shapes, paragraphs, _ = hwpx_render(md, settings)
+    assert tbl(paragraphs).find("hp:caption", NS) is None
+    caption = hwpx_texts(paragraphs).index("<표 1> 좁은 표에 붙은 긴 캡션")
+    anchor = next(i for i, p in enumerate(paragraphs) if p.find(".//hp:tbl", NS) is not None)
+    assert caption == (anchor - 1 if above else anchor + 1)
+    assert paragraphs[caption].get("styleIDRef") == shapes["caption"].style
+
+
 def test_cell_paragraphs_use_the_table_size_and_cell_alignment():
     header, _, paragraphs, _ = hwpx_render("| a |\n|--:|\n| 1 |\n", hwpx_settings(tables={None: TableLook(font_size=9.0)}))
     p = tbl(paragraphs).find("hp:tr/hp:tc/hp:subList/hp:p", NS)

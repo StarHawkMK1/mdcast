@@ -85,6 +85,19 @@ def test_inline_and_figure_pictures_in_the_section():
     assert caption.get("side") == "BOTTOM" and "그림 설명" in "".join(caption.itertext())
 
 
+@pytest.mark.parametrize("above", [False, True])
+def test_caption_wider_than_its_picture_is_a_paragraph_of_its_own(above):
+    # Hangul draws a picture's caption only as wide as the picture: a narrow one wraps or vanishes
+    md = "![긴 설명이 달린 작은 그림](a.png){width=8mm}\n"
+    _, shapes, paragraphs, _ = hwpx_render(md, hwpx_settings(images={"a.png": PNG400}, figure_caption_above=above))
+    assert all(p.find(".//hp:caption", NS) is None for p in paragraphs)
+    texts = hwpx_texts(paragraphs)
+    caption = texts.index("긴 설명이 달린 작은 그림")
+    picture = next(i for i, p in enumerate(paragraphs) if p.find(".//hp:pic", NS) is not None)
+    assert caption == (picture - 1 if above else picture + 1)
+    assert paragraphs[caption].get("styleIDRef") == shapes["caption"].style
+
+
 def test_picture_in_quote_fits_the_indented_width():
     wide = Image(data=b"w", ext="png", width_px=4000, height_px=1000)
     _, _, paragraphs, _ = hwpx_render("> ![넓은 그림](w.png)\n", hwpx_settings(images={"w.png": wide}))

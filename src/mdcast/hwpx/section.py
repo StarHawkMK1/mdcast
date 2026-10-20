@@ -34,6 +34,7 @@ _CONTROL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f￾￿]")  # not allowed i
 _GAP_EM = 0.5  # between a list marker and its text, as the docx writer
 _MIN_HANGING_MM = 3.0
 _MIN_WIDTH_MM = 10.0  # narrowest room offered to a table or picture
+_CAPTION_SLACK = 1.15  # captions are bold and text_em is rough
 # A table floats with its paragraph: Hangul never splits a table treated as a character across
 # pages, it pushes it whole to the next page and cuts it there (appendix B-5). PARA keeps list indents.
 TABLE_MARGIN = 283  # HWPUNIT (1mm), Hangul's own space above and below a table
@@ -345,6 +346,10 @@ class SectionWriter:
         units[-1] += total - sum(units)
         pad = hwpunit(look.padding)
         row_height = hwpunit(size * 25.4 / 72 * (look.line_height or 1.0)) + 2 * pad
+        above = self.settings.table_caption_above
+        loose = bool(caption) and not self._caption_fits(caption, _mm(total))
+        if loose and above:
+            self._caption(caption, ctx)
         anchor = self.paragraph(ctx.element, ctx)
 
         number = str(next(self._objects))
@@ -360,8 +365,8 @@ class SectionWriter:
         # Hangul's 1mm above and below: without it the next paragraph runs into a floating table
         etree.SubElement(element, hp("outMargin"), left="0", right="0", top=str(TABLE_MARGIN),
                          bottom=str(TABLE_MARGIN))
-        if caption:
-            element.append(self.caption_element(caption, total, self.settings.table_caption_above))
+        if caption and not loose:
+            element.append(self.caption_element(caption, total, above))
         margins = {"left": str(pad), "right": str(pad), "top": str(pad), "bottom": str(pad)}
         etree.SubElement(element, hp("inMargin"), margins)
         shapes = self._cell_shapes(size, look)
@@ -381,6 +386,8 @@ class SectionWriter:
                 etree.SubElement(tc, hp("cellSz"), width=str(width), height=str(row_height * slot.rowspan))
                 etree.SubElement(tc, hp("cellMargin"), margins)
         anchor.object(self.shapes[ctx.element].char, element)
+        if loose and not above:
+            self._caption(caption, ctx)
 
     def _cell_shapes(self, size: float, look: TableLook) -> dict[str, Shape]:
         """The element shapes with the body at the table's size and line height, no paragraph gaps."""
@@ -421,6 +428,9 @@ class SectionWriter:
         found: list[pf.Image] = []
         figure.content.walk(lambda e, _d: found.append(e) if isinstance(e, pf.Image) else None)
         own = len(found) == 1 and found[0].url in self.settings.images and self.pictures is not None
+        if own:
+            width, _ = self._picture_mm(found[0], self.available(ctx, ctx.element))
+            own = self._caption_fits(caption, width)
         above = self.settings.figure_caption_above
         if caption and not own and above:
             self._caption(caption, ctx)
@@ -442,13 +452,25 @@ class SectionWriter:
         if image is None or self.pictures is None:  # the adapter already warned about it
             paragraph.text(char, f"[이미지: {alt or item.url}]")
             return
-        width, height = picture_size(image, item.attributes.get("width"), item.attributes.get("height"),
-                                     paragraph.room, self.settings.figure_max_ratio, self.settings.figure_max_mm)
+        width, height = self._picture_mm(item, paragraph.room)
         caption = None
         if self._figure_caption is not None and self._figure_caption[0] is item:
             caption = self.caption_element(self._figure_caption[1], hwpunit(width), self.settings.figure_caption_above)
         item_id = self.pictures.add(image)
         paragraph.object(char, picture_element(item_id, image, width, height, alt, next(self._objects), caption))
+
+    def _picture_mm(self, item: pf.Image, room: float) -> tuple[float, float]:
+        return picture_size(self.settings.images[item.url], item.attributes.get("width"),
+                            item.attributes.get("height"), room, self.settings.figure_max_ratio,
+                            self.settings.figure_max_mm)
+
+    def _caption_fits(self, blocks: list[pf.Element], width: float) -> bool:
+        """Hangul sets a caption only as wide as its table or picture (appendix B-8): one line must fit."""
+        if not blocks:
+            return True
+        size = self.shapes["caption"].look.size or self.settings.body_size
+        longest = max(text_em(pf.stringify(b)) for b in blocks)
+        return longest * size * 25.4 / 72 * _CAPTION_SLACK <= width
 
     @staticmethod
     def _caption_blocks(caption: pf.Caption | None) -> list[pf.Element]:
