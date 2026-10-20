@@ -1,6 +1,6 @@
 # mdcast
 
-Markdown ↔ docx · hwpx · pdf, 템플릿 기반 변환기. (M1: MD → docx, pdf · M2: MD → hwpx)
+Markdown ↔ docx · hwpx · pdf, 템플릿 기반 변환기. (M1: MD → docx, pdf · M2: MD → hwpx · M3a: docx → MD)
 
 ## 설치 (개발)
 
@@ -13,11 +13,16 @@ Markdown ↔ docx · hwpx · pdf, 템플릿 기반 변환기. (M1: MD → docx, 
     uv run mdcast template list
     uv run mdcast template describe default
     uv run mdcast template validate ./my-template
+    uv run mdcast convert 보고서.docx            # → 보고서.md + 보고서_assets/
+    uv run mdcast convert 보고서.docx --force    # 이미 있는 결과를 덮어씀
 
 - 템플릿 탐색 순서: 경로 → `./.mdcast/templates/<이름>` → `~/.mdcast/templates/<이름>` → 내장 `default`
 - 쪽 나눔: `<!-- pagebreak -->` 또는 템플릿 `layout.page_break.before`
 - 표 종류: 표 바로 위에 `<!-- table: 이름 -->`
 - 병합 셀 표: HTML `<table>` + `<thead>`/`<tbody>` + `rowspan`/`colspan`
+- 가져오기(docx → MD): `--to` 를 생략하면 md 입력은 docx, 그 밖은 md 로 나온다. 결과 `<이름>.md` 나 `<이름>_assets/` 가 이미 있으면 멈추고(`OUTPUT_EXISTS`), `--force` 를 줘야 덮어쓴다 (assets 폴더는 비우고 다시 씀). 그림은 `_assets/` 에 PNG 등으로 풀리고, WMF·EMF 는 Windows 에서 PNG 로 바꾼다 (못 바꾸면 `IMAGE_CONVERT_FAILED` 경고 후 원본을 둔다).
+- 가져오기가 끝나면 `내용 보존 NN.N%` 가 표시됩니다. 원본 글이 MD 에 얼마나 남았는지 센 값이고, 빠진 글은 `IMPORT_TEXT_MISSING` 경고로 알립니다. 글이 그림 안에만 있을 수 있는 그림은 `IMPORT_IMAGE_TEXT` 경고로 알립니다. 머리말·꼬리말은 가져오지 않습니다 (`IMPORT_HEADER_SKIPPED`).
+- 손으로 친 번호·기호로 만든 제목·목록은 추정해 되살립니다 (`IMPORT_HEADING_INFERRED`, `IMPORT_LIST_INFERRED`). hwpx·pdf 입력은 아직 지원하지 않습니다.
 - 이벤트 코드 `FRONTMATTER_INVALID`: YAML 머리말이 깨지면 경고하고 변환은 계속한다
 
 ## 테스트
@@ -28,6 +33,7 @@ Markdown ↔ docx · hwpx · pdf, 템플릿 기반 변환기. (M1: MD → docx, 
     uv run pytest tests/test_word_parity.py --run-word   # Word 로 내보낸 docx 와 PDF 의 줄 간격 비교 (Windows + Word, 선택)
     uv run python -m pytest tests/test_hangul.py --run-hangul   # 한글로 열기·줄 간격·위치 비교 (Windows + 한글, 선택)
     uv run python scripts/render_pages.py out.hwpx   # 한글 → PDF → PNG
+    MDCAST_CORPUS_DIR=<시험 문서 폴더> uv run pytest tests/test_import_corpus.py   # 실제 docx 코퍼스(`*시험합의서*.docx`) 가져오기 시험 (폴더가 없으면 건너뜀, 문서는 저장소에 없음)
 
 ## 템플릿: 줄 높이
 
