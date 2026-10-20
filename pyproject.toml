@@ -46,6 +46,7 @@ markers = [
   "visual: page-image comparison against tests/golden (run with --run-visual)",
   "word: Microsoft Word export compared with the PDF writer (run with --run-word)",
   "hangul: needs Hancom Office via COM (local Windows only)",
+  "corpus: real documents from MDCAST_CORPUS_DIR (local only)",
 ]
 
 [tool.ruff]
