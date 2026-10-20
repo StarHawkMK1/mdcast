@@ -156,8 +156,14 @@ def convert(input_path, to, template, out_dir, as_json, verbose, quiet, keep_tem
         try:
             destination.mkdir(parents=True, exist_ok=True)
             (destination / output.name).write_bytes(output.data)
+            root = (destination / f"{Path(output.name).stem}_assets").resolve()
             for key, blob in output.assets.items():
                 target = destination / key
+                if not target.resolve().is_relative_to(root):
+                    result.report.warn(
+                        Codes.RENDER_WARNING, f"그림 경로가 그림 폴더 밖을 가리켜 저장하지 않습니다: {key}", format=output.format.value
+                    )
+                    continue
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(blob)
         except OSError as exc:

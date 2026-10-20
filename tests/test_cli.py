@@ -262,3 +262,24 @@ def test_corrupt_docx_cli_exit_1_no_traceback(env):
     r = run("convert", str(path))
     assert r.exit_code == 1 and "Traceback" not in r.output
     assert "입력을 해석할 수 없습니다" in r.output and not (env / "bad.md").exists()
+
+
+def test_asset_outside_assets_folder_is_skipped(env, monkeypatch):
+    from mdcast import pipeline
+    from mdcast.types import Format, Output, Result
+    from mdcast.report import Report
+
+    def fake(source, targets, template=None, options=None):
+        report = Report(source.name, source.format)
+        out = Output(Format.MD, "x.md", b"# a", assets={"x_assets/ok.png": b"1", "x_assets/../evil.png": b"2", "x_assets/..\\..\\e2.png": b"3"})
+        report.set_outputs([out])
+        return Result([out], report)
+
+    monkeypatch.setattr(pipeline, "convert", fake)
+    docx_path = env / "x.docx"
+    docx_path.write_bytes(b"PK")
+    r = run("convert", str(docx_path))
+    assert r.exit_code == 0, r.output
+    assert (env / "x_assets" / "ok.png").is_file()
+    assert not (env / "evil.png").exists() and not (env.parent / "e2.png").exists()
+    assert r.output.count("저장하지 않습니다") >= 2

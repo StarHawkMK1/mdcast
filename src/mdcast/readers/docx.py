@@ -61,6 +61,12 @@ def _has_description(img: pf.Image) -> bool:
     return bool(pf.stringify(img).strip())
 
 
+def _media_name(url: str, n: int) -> str:
+    """File name for an image of an untrusted package: never a path, never empty, ``.`` or ``..``."""
+    name = url.replace("\\", "/").rsplit("/", 1)[-1]
+    return name if name not in ("", ".", "..") else f"image{n}.png"
+
+
 def _unique_name(name: str, blob: bytes, taken: dict[str, bytes]) -> str:
     stem, dot, ext = name.rpartition(".")
     candidate, n = name, 1
@@ -92,7 +98,7 @@ def read_docx(source: Source, report: Report, assets_dir: str) -> ImportedDocume
     def convert(url: str) -> str:
         if url in urls:
             return urls[url]
-        name = url.rsplit("/", 1)[-1]
+        name = _media_name(url, len(media) + 1)
         blob = blobs[f"word/{url}"]
         converted = to_png(blob, name)
         if converted is None:

@@ -142,3 +142,39 @@ def test_colliding_media_names_stay_distinct():
     urls = [i.url for i in images]
     assert len(set(urls)) == 2 and len(imp.media) == 2
     assert all(u.split("/", 1)[1] in imp.media for u in urls)
+
+
+def _rename_media(data: bytes, old: str, new: str) -> bytes:
+    import zipfile
+
+    src = zipfile.ZipFile(io.BytesIO(data))
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as target:
+        for info in src.infolist():
+            blob = src.read(info.filename)
+            if info.filename == f"word/{old}":
+                entry = zipfile.ZipInfo("x")
+                entry.filename = f"word/{new}"  # set after init: ZipInfo would turn backslashes into slashes
+                target.writestr(entry, blob)
+                continue
+            if info.filename == "word/_rels/document.xml.rels":
+                blob = blob.decode("utf-8").replace(old, new).encode("utf-8")
+            target.writestr(info.filename, blob)
+    return out.getvalue()
+
+
+def test_media_names_never_escape_the_assets_folder():
+    from mdcast.readers.docx import _media_name
+
+    B = chr(92)
+    assert _media_name(f"media/..{B}..{B}evil.png", 1) == "evil.png"
+    assert _media_name(f"media/a{B}b{B}pic.png", 1) == "pic.png"
+    assert _media_name("media/a/b.png", 1) == "b.png"
+    for url in ("media/..", "media/.", "media/", f"media{B}..", ""):
+        assert _media_name(url, 3) == "image3.png"
+
+
+def test_odd_media_path_still_imports_inside_assets():
+    data = docx_bytes(lambda d: d.add_picture(io.BytesIO(tiny_png())))
+    imp, _ = read(_rename_media(data, "media/image1.png", "media/a/b/pic.png"))
+    assert list(imp.media) == ["pic.png"] and first(imp.doc, pf.Image).url == "보고 서_assets/pic.png"
