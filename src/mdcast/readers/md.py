@@ -117,6 +117,17 @@ def expand_html_tables(doc: pf.Doc, definitions: dict[str, str] | None = None) -
     return doc.walk(action)
 
 
+def _decode_image_paths(doc: pf.Doc) -> pf.Doc:
+    """pandoc percent-encodes spaces in link destinations; local image paths must keep them."""
+
+    def action(elem: pf.Element, _doc: pf.Doc):
+        if isinstance(elem, pf.Image) and "%20" in elem.url:
+            elem.url = elem.url.replace("%20", " ")
+        return None
+
+    return doc.walk(action)
+
+
 def _yaml_error_detail(exc: RuntimeError) -> str:
     lines = [line.strip() for line in str(exc).splitlines() if line.strip()]
     return next((line for line in lines if "YAML" in line), lines[0] if lines else "")
@@ -131,12 +142,14 @@ def read_md(source: Source, report: Report) -> MdDocument:
         block = _FRONTMATTER.match(text)
         if block is None:
             raise
-        body = expand_html_tables(md_to_doc(text[block.end():]), collect_note_definitions(text[block.end():]))
+        body = _decode_image_paths(
+            expand_html_tables(md_to_doc(text[block.end():]), collect_note_definitions(text[block.end():]))
+        )
         report.warn(
             Codes.FRONTMATTER_INVALID,
             f"frontmatter(YAML)를 해석할 수 없어 무시합니다: {_yaml_error_detail(exc)}",
         )
         return MdDocument(body, {})
-    doc = expand_html_tables(doc, collect_note_definitions(text))
+    doc = _decode_image_paths(expand_html_tables(doc, collect_note_definitions(text)))
     meta = doc.get_metadata()
     return MdDocument(doc, dict(meta) if isinstance(meta, dict) else {})
