@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import itertools
 import re
 from contextlib import contextmanager
@@ -40,7 +41,7 @@ _OBJECT_POS = {  # tables and pictures sit in the text like a character (appendi
 }
 _ALIGN = {"AlignLeft": "left", "AlignCenter": "center", "AlignRight": "right"}
 _DEGRADED = {
-    "footnote": "hwpx 각주는 M2b 에서 지원합니다 — 문서 끝에 모아 썼습니다",
+    "footnote": "hwpx 는 각주 안·캡션 안에 각주를 넣을 수 없어 문서 끝에 [주 n] 으로 모아 썼습니다",
     "math": "hwpx 수식은 M4 에서 이미지로 지원합니다 — LaTeX 원문을 썼습니다",
 }
 
@@ -83,6 +84,7 @@ class Paragraph:
         )
         self.char = char
         self.room = 0.0  # mm a picture in this paragraph may take
+        self.in_note = False  # a footnote or caption: notes here fall back
         self._run: etree._Element | None = None
         self._text: etree._Element | None = None
 
@@ -164,6 +166,7 @@ class SectionWriter:
         self.note_format = note_format
         self._objects = itertools.count(1)
         self._figure_caption: tuple[pf.Image, list[pf.Element]] | None = None
+        self._footnotes = 0
         self.shapes = shapes
         self.settings = settings
         self.notices = notices
@@ -218,6 +221,7 @@ class SectionWriter:
         shape = self.shapes[element]
         paragraph = Paragraph(para or self._para_id(element, ctx), shape.style, shape.char, self._page_break)
         paragraph.room = self.available(ctx, element)
+        paragraph.in_note = ctx.note
         self._page_break = False
         self.paragraphs.append(paragraph)
         return paragraph
@@ -442,11 +446,36 @@ class SectionWriter:
         ctx = Context(element="footnote", width=self.width, note=True)
         char = self.shapes["footnote"].char
         paragraph = self.paragraph("footnote", ctx)
-        paragraph.text(char, f"[{number}] ")
+        paragraph.text(char, f"[주 {number}] ")
         rest = list(blocks)
         if rest and isinstance(rest[0], (pf.Para, pf.Plain)):
             self.inlines(paragraph, rest.pop(0).content, char)
         self.blocks(rest, ctx)
+
+    def footnote(self, paragraph: Paragraph, item: pf.Note, char: str) -> None:
+        """Hangul's footnote (appendix B-12); inside a note or caption it falls back to [주 n]."""
+        if paragraph.in_note:
+            self.notices.add("degraded", "footnote", _DEGRADED["footnote"])
+            self._notes.append(list(item.content))
+            paragraph.text(char, f"[주 {len(self._notes)}]")
+            return
+        self._footnotes += 1
+        number = str(self._footnotes)
+        ctx = Context(element="footnote", width=self.width, note=True)
+        note_char = self.shapes["footnote"].char
+        with self._collect() as paragraphs:
+            first = self.paragraph("footnote", ctx)
+            auto = etree.SubElement(first.control(note_char), hp("autoNum"), num=number, numType="FOOTNOTE")
+            auto.append(copy.deepcopy(self.note_format) if self.note_format is not None else etree.Element(
+                hp("autoNumFormat"), type="DIGIT", userChar="", prefixChar="", suffixChar=")", supscript="0"))
+            first.text(note_char, " ")
+            rest = list(item.content)
+            if rest and isinstance(rest[0], (pf.Para, pf.Plain)):
+                self.inlines(first, rest.pop(0).content, note_char)
+            self.blocks(rest, ctx)
+        note = etree.SubElement(paragraph.control(char), hp("footNote"), number=number, suffixChar="41",
+                                instId=str(next(self._objects)))
+        note.append(sub_list([p.finish() for p in paragraphs], "TOP"))
 
     # inlines ------------------------------------------------------------------------------
 
@@ -494,9 +523,7 @@ class SectionWriter:
         elif isinstance(item, pf.Image):
             self.picture(paragraph, item, char)
         elif isinstance(item, pf.Note):
-            self.notices.add("degraded", "footnote", _DEGRADED["footnote"])
-            self._notes.append(list(item.content))
-            paragraph.text(char, f"[{len(self._notes)}]")
+            self.footnote(paragraph, item, char)
         elif isinstance(item, pf.Link):
             self.link(paragraph, item, char)
         elif isinstance(item, (pf.SmallCaps, pf.Span, pf.Cite)):

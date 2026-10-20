@@ -26,8 +26,9 @@ def write(doc: pf.Doc, container: bytes, settings: Settings) -> tuple[bytes, lis
     shapes = build_shapes(header, settings, notices)
     apply_page(sec_pr, settings.page)  # tables and pictures need the body width (spec 2026-10-20 §3.3)
     pictures = Pictures(package, content)
+    note_format = sec_pr.find(f"{hp('footNotePr')}/{hp('autoNumFormat')}")
     paragraphs = SectionWriter(header, shapes, settings, notices, width=body_width(sec_pr),
-                               pictures=pictures).build(doc)
+                               pictures=pictures, note_format=note_format).build(doc)
     assemble(section, paragraphs, header, shapes, settings)
     apply_metadata(content, settings.metadata)
     keep_first_section(package, content)
