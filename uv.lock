@@ -169,6 +169,7 @@ dependencies = [
     { name = "click" },
     { name = "lxml" },
     { name = "panflute" },
+    { name = "pillow" },
     { name = "pypandoc-binary" },
     { name = "python-docx" },
     { name = "pyyaml" },
@@ -177,7 +178,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "pillow" },
     { name = "pypdfium2" },
     { name = "pytest" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
@@ -189,6 +189,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.1" },
     { name = "lxml", specifier = ">=5.2" },
     { name = "panflute", specifier = "==2.3.1" },
+    { name = "pillow", specifier = ">=10" },
     { name = "pypandoc-binary", specifier = "==1.17" },
     { name = "python-docx", specifier = "==1.2.0" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -197,7 +198,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "pillow", specifier = ">=10" },
     { name = "pypdfium2", specifier = ">=4.30" },
     { name = "pytest", specifier = ">=8" },
     { name = "pywin32", marker = "sys_platform == 'win32'", specifier = ">=306" },

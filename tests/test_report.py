@@ -79,3 +79,16 @@ def test_format_parsing():
     assert Format.from_filename("x.markdown") is Format.MD
     with pytest.raises(ValueError):
         Format.from_filename("x.txt")
+
+
+def test_coverage_is_reported_only_when_measured():
+    r = Report("a.docx", Format.DOCX)
+    assert "coverage" not in r.to_dict()
+    r.coverage = 0.9875
+    assert r.to_dict()["coverage"] == 0.9875
+
+
+def test_import_codes_exist():
+    for name in ("IMPORT_HEADING_INFERRED", "IMPORT_LIST_INFERRED", "IMPORT_TEXT_MISSING",
+                 "IMPORT_IMAGE_TEXT", "IMPORT_HEADER_SKIPPED", "IMAGE_CONVERT_FAILED", "OUTPUT_EXISTS"):
+        assert getattr(Codes, name) == name

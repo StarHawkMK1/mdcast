@@ -33,6 +33,13 @@ class Codes:
     RENDER_WARNING = "RENDER_WARNING"
     RENDER_FAILED = "RENDER_FAILED"
     OUTPUT_WRITE_FAILED = "OUTPUT_WRITE_FAILED"
+    IMPORT_HEADING_INFERRED = "IMPORT_HEADING_INFERRED"
+    IMPORT_LIST_INFERRED = "IMPORT_LIST_INFERRED"
+    IMPORT_TEXT_MISSING = "IMPORT_TEXT_MISSING"
+    IMPORT_IMAGE_TEXT = "IMPORT_IMAGE_TEXT"
+    IMPORT_HEADER_SKIPPED = "IMPORT_HEADER_SKIPPED"
+    IMAGE_CONVERT_FAILED = "IMAGE_CONVERT_FAILED"
+    OUTPUT_EXISTS = "OUTPUT_EXISTS"
 
 
 @dataclass(frozen=True)
@@ -75,6 +82,7 @@ class Report:
         self.template: TemplateInfo | None = None
         self.outputs: list[dict[str, Any]] = []
         self.temp_dir: str | None = None
+        self.coverage: float | None = None
         self._seen: set[tuple[Any, ...]] = set()
 
     def add(self, level: Level, code: str, message: str, *, once: bool = False, **where: Any) -> None:
@@ -123,4 +131,6 @@ class Report:
         }
         if self.temp_dir:
             data["temp_dir"] = self.temp_dir
+        if self.coverage is not None:
+            data["coverage"] = self.coverage
         return data

@@ -17,6 +17,7 @@ dependencies = [
   "lxml>=5.2",
   "PyYAML>=6.0",
   "click>=8.1",
+  "pillow>=10",
 ]
 
 [project.scripts]
@@ -26,7 +27,6 @@ mdcast = "mdcast.cli:main"
 dev = [
   "pytest>=8",
   "pypdfium2>=4.30",
-  "pillow>=10",
   "ruff>=0.6",
   "pywin32>=306; sys_platform == 'win32'",
 ]
