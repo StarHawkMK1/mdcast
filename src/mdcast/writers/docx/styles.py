@@ -5,9 +5,11 @@ from typing import Any
 from docx.enum.section import WD_ORIENT
 from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.opc.constants import RELATIONSHIP_TYPE as RT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Mm, Pt, RGBColor
+from lxml import etree
 
 from mdcast.fonts import latin_name
 from mdcast.report import Codes, Report
@@ -110,6 +112,38 @@ def tighten_compact(d) -> None:
     if style is not None:
         style.paragraph_format.space_before = Pt(0)
         style.paragraph_format.space_after = Pt(0)
+
+
+def _compact_to_footnote(root, compact_id: str, footnote_id: str) -> bool:
+    changed = False
+    for style in root.iter(qn("w:pStyle")):
+        if style.get(qn("w:val")) == compact_id:
+            style.set(qn("w:val"), footnote_id)
+            upsert(style.getparent(), "w:spacing", PPR_ORDER, before=0, after=0)
+            changed = True
+    return changed
+
+
+def compact_notes_as_footnote_text(d) -> None:
+    """Tight list items and table cells in the notes take Footnote Text, with no gaps.
+
+    pandoc gives them Compact, the body's size and line; the PDF draws them as footnote text.
+    """
+    by_name = _by_name(d)
+    compact, footnote = by_name.get("Compact"), by_name.get("Footnote Text")
+    if compact is None or footnote is None:
+        return
+    for rel in d.part.rels.values():
+        if rel.is_external or rel.reltype not in (RT.FOOTNOTES, RT.ENDNOTES):
+            continue
+        part = rel.target_part
+        if hasattr(part, "element"):
+            _compact_to_footnote(part.element, compact.style_id, footnote.style_id)
+            continue
+        # python-docx loads the notes as plain parts: edit the XML and put it back
+        root = etree.fromstring(part.blob)
+        if _compact_to_footnote(root, compact.style_id, footnote.style_id):
+            part._blob = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
 
 
 def _rebase_secondaries(d, target: str, secondaries: list[str]) -> None:

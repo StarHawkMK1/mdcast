@@ -222,3 +222,24 @@ def test_line_height_stays_within_words_range():
     assert line_twips(20, 1000) == 31680  # Word's maximum, 1584pt
     assert line_twips(0.001, 1) == 1
     assert line_twips(1.8, 11) == 396
+
+
+def _note_paragraphs(d) -> dict[str, object]:
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
+    from lxml import etree
+
+    part = next(r.target_part for r in d.part.rels.values() if r.reltype == RT.FOOTNOTES)
+    root = etree.fromstring(part.blob)
+    return {"".join(p.itertext()).strip(): p for p in root.iter(qn("w:p"))}
+
+
+def test_tight_list_and_cells_in_a_footnote_take_the_footnote_look(tmp_path):
+    # pandoc gives them Compact (the body's size and line); the PDF draws them as footnote text
+    md = "본문[^1]\n\n[^1]: 각주\n\n    - 하나\n    - 둘\n\n    | 칸 |\n    |---|\n    | 셀 |\n"
+    d, _ = render(tmp_path, md)
+    found = _note_paragraphs(d)
+    for text in ("하나", "둘", "칸", "셀"):
+        ppr = found[text].find(qn("w:pPr"))
+        assert ppr.find(qn("w:pStyle")).get(qn("w:val")) == "FootnoteText", text
+        spacing = ppr.find(qn("w:spacing"))
+        assert (spacing.get(qn("w:before")), spacing.get(qn("w:after"))) == ("0", "0"), text

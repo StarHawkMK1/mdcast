@@ -19,6 +19,7 @@ from mdcast.writers.docx.styles import (
     align_figures,
     apply_elements,
     apply_page,
+    compact_notes_as_footnote_text,
     disable_autospace,
     remap_styles,
     tighten_compact,
@@ -87,6 +88,7 @@ def write_docx(doc: pf.Doc, ctx: WriterContext) -> bytes:
     apply_elements(d, looks, used, fallback_pt=parse_pt(config["elements"]["body"]["size"]))
     apply_headers(d, config, ctx.fields)
     apply_list_numbering(d, config)
+    compact_notes_as_footnote_text(d)
     explicit_tables = ctx.template.explicit if container_source == "custom" else None
     apply_tables(d, config, explicit_tables, ctx.state.get("tables", []), ctx.report)
     align_figures(d, looks)
