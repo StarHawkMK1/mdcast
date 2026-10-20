@@ -14,6 +14,7 @@ from pathlib import Path
 import panflute as pf
 
 from mdcast.report import Codes
+from mdcast.units import parse_length_mm, parse_ratio
 from mdcast.writers.context import WriterContext
 
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
@@ -218,8 +219,10 @@ def _webp_size(data: bytes) -> tuple[int, int]:
     raise ValueError("WebP 크기를 찾지 못했습니다")
 
 
-def image_info(data: bytes) -> tuple[str, int, int, float]:
-    """(format, width px, height px, dpi) of PNG, JPEG, GIF, BMP, WebP or SVG bytes; dpi 96 when unknown.
+def image_info(data: bytes, default_dpi: float = 96.0) -> tuple[str, int, int, float]:
+    """(format, width px, height px, dpi) of PNG, JPEG, GIF, BMP, WebP or SVG bytes.
+
+    A raster image that does not say gets ``default_dpi``; SVG px are CSS px, 96 to the inch.
 
     Raises ``ValueError`` for anything else or a header too short to read.
     """
@@ -239,15 +242,24 @@ def image_info(data: bytes) -> tuple[str, int, int, float]:
         elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
             kind, (width, height), dpi = "webp", _webp_size(data), 0.0
         elif _SVG_START.match(data[:4096]):
-            kind, (width, height), dpi = "svg", _svg_size(data), 0.0
+            kind, (width, height), dpi = "svg", _svg_size(data), 96.0
         else:
             raise ValueError("알 수 없는 이미지 형식입니다")
     except IndexError as exc:
         raise ValueError("이미지 머리가 잘렸습니다") from exc
     if not (0 < width <= MAX_IMAGE_PX and 0 < height <= MAX_IMAGE_PX):
         raise ValueError("이미지 크기가 0 입니다")
-    return kind, width, height, float(dpi) if dpi and dpi > 0 else 96.0
+    return kind, width, height, float(dpi) if dpi and dpi > 0 else default_dpi
 
+
+
+def figure_limit(value: object) -> tuple[float | None, float | None]:
+    """``figures.max_width`` as (ratio of the available width, length in mm); one of them is set."""
+    if value is None:
+        return 1.0, None
+    if str(value).strip().endswith("%"):
+        return parse_ratio(value), None
+    return None, parse_length_mm(value)
 
 def image_complete(kind: str, data: bytes) -> bool:
     """Whether the file runs to its end marker (a cut download or copy otherwise shows half a picture)."""

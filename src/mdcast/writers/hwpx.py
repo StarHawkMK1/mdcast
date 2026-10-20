@@ -17,7 +17,13 @@ from mdcast.report import Codes
 from mdcast.units import normalize_color, page_size_mm, parse_length_mm, parse_pt, parse_ratio
 from mdcast.writers.context import RenderError, WriterContext
 from mdcast.writers.generator import generator_values
-from mdcast.writers.images import image_complete, image_info, localize_images, webp_to_png
+from mdcast.writers.images import (
+    figure_limit,
+    image_complete,
+    image_info,
+    localize_images,
+    webp_to_png,
+)
 
 # what the PDF uses where the built-in template leaves a key empty (spec §4.3), so Hangul's
 # blank-document defaults (outline indents, justified text, …) do not leak into the output
@@ -129,15 +135,6 @@ def _table_look(values: dict[str, Any]) -> hwpx.TableLook:
     )
 
 
-def _figure_limit(value: Any) -> tuple[float | None, float | None]:
-    """``figures.max_width`` as (ratio of the available width, length in mm); one of them is set."""
-    if value is None:
-        return 1.0, None
-    if str(value).strip().endswith("%"):
-        return parse_ratio(value), None
-    return None, parse_length_mm(value)
-
-
 def _settings(ctx: WriterContext, custom: bool) -> hwpx.Settings:
     config = ctx.template.config
     values = ctx.template.explicit if custom else config
@@ -175,7 +172,7 @@ def _settings(ctx: WriterContext, custom: bool) -> hwpx.Settings:
         for variant in [None, *(config["tables"].get("variants") or {})]
     }
     figures = config["figures"]
-    max_ratio, max_mm = _figure_limit(figures.get("max_width"))
+    max_ratio, max_mm = figure_limit(figures.get("max_width"))
     return hwpx.Settings(
         looks=looks,
         styles=styles,

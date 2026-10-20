@@ -11,10 +11,12 @@ from mdcast.report import Codes
 from mdcast.units import parse_pt
 from mdcast.writers.context import RenderError, WriterContext
 from mdcast.writers.docx.headers import apply_headers
+from mdcast.writers.docx.images import fit_pictures, picture_requests
 from mdcast.writers.docx.inline import loosen_inline_objects
 from mdcast.writers.docx.meta import apply_metadata
 from mdcast.writers.docx.numbering import apply_list_numbering
 from mdcast.writers.docx.styles import (
+    align_figures,
     apply_elements,
     apply_page,
     disable_autospace,
@@ -69,6 +71,7 @@ def _open_output(doc: pf.Doc, ctx: WriterContext):
 
 def write_docx(doc: pf.Doc, ctx: WriterContext) -> bytes:
     doc = localize_images(doc, ctx)
+    pictures = picture_requests(doc, ctx.work_dir)
     _drop_title_block(doc)
     d, container_source = _open_output(doc, ctx)
     config = ctx.template.config
@@ -86,7 +89,9 @@ def write_docx(doc: pf.Doc, ctx: WriterContext) -> bytes:
     apply_list_numbering(d, config)
     explicit_tables = ctx.template.explicit if container_source == "custom" else None
     apply_tables(d, config, explicit_tables, ctx.state.get("tables", []), ctx.report)
-    loosen_inline_objects(d)  # after the cells' line heights are set
+    align_figures(d, looks)
+    fit_pictures(d, pictures, config)  # after the page and the tables are set
+    loosen_inline_objects(d)  # after the cells' line heights and the picture sizes are set
     apply_metadata(d, ctx.generator, ctx.fields, ctx.report)
     buffer = io.BytesIO()
     d.save(buffer)

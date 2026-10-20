@@ -242,3 +242,14 @@ def apply_elements(d, config: dict[str, Any], used: dict[str, list[str]], *, fal
             apply_look(style, look, character_only=name in CHARACTER_ONLY, size_pt=size_pt or fallback_pt)
     if "Verbatim Char" in by_name and fonts.get("code"):
         set_font(by_name["Verbatim Char"], fonts["code"])
+
+
+def align_figures(d, config: dict[str, Any]) -> None:
+    """``figures.align`` on pandoc's figure paragraphs (Captioned Figure is based on Figure)."""
+    align = (config.get("figures") or {}).get("align")
+    if align not in _ALIGN:
+        return
+    by_name = _by_name(d)
+    for name in ("Figure", "Captioned Figure"):
+        if name in by_name:
+            by_name[name].paragraph_format.alignment = _ALIGN[align]
