@@ -59,13 +59,21 @@ def collect_note_definitions(text: str) -> dict[str, str]:
             current.append(line[4:] if line.startswith("    ") else line[1:])
         elif current is not None and not line.strip():
             current.append("")
+        elif current and current[-1]:
+            current.append(line)  # lazy continuation of the open paragraph
         else:
             current = None
     return {label: "\n".join(lines).strip() for label, lines in notes.items()}
 
 
-def _note_blocks(text: str) -> dict[str, list[pf.Block]]:
-    return {label: list(md_to_doc(body).content) for label, body in collect_note_definitions(text).items() if body}
+def _note_blocks(definitions: dict[str, str], labels: set[str]) -> dict[str, list[pf.Block]]:
+    wanted = [label for label in definitions if label in labels and definitions[label]]
+    if not wanted:
+        return {}
+    # One pandoc call for all needed definitions: each body in its own fenced div.
+    text = "\n".join(f"::: {{#n{i}}}\n{definitions[label]}\n:::\n" for i, label in enumerate(wanted))
+    by_id = {d.identifier: list(d.content) for d in md_to_doc(text).content if isinstance(d, pf.Div)}
+    return {label: by_id[f"n{i}"] for i, label in enumerate(wanted) if f"n{i}" in by_id}
 
 
 def _link_notes(elem: pf.Element, notes: dict[str, list[pf.Block]]):
@@ -88,9 +96,17 @@ def _link_notes(elem: pf.Element, notes: dict[str, list[pf.Block]]):
     return out
 
 
-def expand_html_tables(doc: pf.Doc, notes: dict[str, list[pf.Block]] | None = None) -> pf.Doc:
+def expand_html_tables(doc: pf.Doc, definitions: dict[str, str] | None = None) -> pf.Doc:
+    def is_table(elem: pf.Element) -> bool:
+        return isinstance(elem, pf.RawBlock) and elem.format == "html" and bool(_TABLE_START.match(elem.text))
+
+    labels: set[str] = set()
+    if definitions:
+        doc.walk(lambda e, d: labels.update(_NOTE_REF.findall(e.text)) if is_table(e) else None)
+    notes = _note_blocks(definitions, labels) if labels else {}
+
     def action(elem: pf.Element, _doc: pf.Doc):
-        if isinstance(elem, pf.RawBlock) and elem.format == "html" and _TABLE_START.match(elem.text):
+        if is_table(elem):
             blocks = html_to_blocks(elem.text)
             if blocks and notes:
                 blocks = [b.walk(lambda e, d: _link_notes(e, notes)) for b in blocks]
@@ -115,12 +131,12 @@ def read_md(source: Source, report: Report) -> MdDocument:
         block = _FRONTMATTER.match(text)
         if block is None:
             raise
-        body = expand_html_tables(md_to_doc(text[block.end():]), _note_blocks(text[block.end():]))
+        body = expand_html_tables(md_to_doc(text[block.end():]), collect_note_definitions(text[block.end():]))
         report.warn(
             Codes.FRONTMATTER_INVALID,
             f"frontmatter(YAML)를 해석할 수 없어 무시합니다: {_yaml_error_detail(exc)}",
         )
         return MdDocument(body, {})
-    doc = expand_html_tables(doc, _note_blocks(text))
+    doc = expand_html_tables(doc, collect_note_definitions(text))
     meta = doc.get_metadata()
     return MdDocument(doc, dict(meta) if isinstance(meta, dict) else {})

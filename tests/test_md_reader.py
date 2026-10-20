@@ -95,3 +95,19 @@ def test_unknown_label_in_cell_stays_text():
     md = "<table><tr><td>x[^nope]</td></tr></table>\n"
     doc = read_md(Source(md.encode(), "t.md", Format.MD), Report("t.md", Format.MD)).doc
     assert "[^nope]" in pf.stringify(doc)
+
+
+def test_lazy_continuation_line_stays_in_cell_note():
+    md = "<table><tr><td>x[^1]</td></tr></table>\n\n[^1]: x\ny lazy\n"
+    doc = read_md(Source(md.encode(), "t.md", Format.MD), Report("t.md", Format.MD)).doc
+    notes = []
+    doc.walk(lambda e, d: notes.append(pf.stringify(e)) if isinstance(e, pf.Note) else None)
+    assert len(notes) == 1 and "y lazy" in notes[0]
+
+
+def test_notes_not_converted_without_html_table(monkeypatch):
+    calls = []
+    real = md_module.md_to_doc
+    monkeypatch.setattr(md_module, "md_to_doc", lambda t: calls.append(t) or real(t))
+    read(b"a[^1]\n\n[^1]: n\n")
+    assert len(calls) == 1
