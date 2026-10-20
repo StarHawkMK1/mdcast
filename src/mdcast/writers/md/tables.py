@@ -4,11 +4,10 @@ import html
 import re
 import secrets
 from collections.abc import Callable
-from copy import deepcopy
 
 import panflute as pf
 
-from mdcast.ast import QUIET, convert_doc
+from mdcast.ast import QUIET, convert_doc, copy_element
 
 PIPE_CELL_FORMAT = "gfm+tex_math_dollars-tex_math_gfm"
 _TAG = re.compile(r"<[A-Za-z][^<>]*>")
@@ -134,7 +133,7 @@ def _math_html(elem: pf.Element, _doc: pf.Doc):
 def _blocks_html(blocks: list[pf.Block], note_label: Callable[[pf.Note], str], batch: CellBatch) -> str:
     # math in a note stays math: the note is written as markdown after the table
     stop = (pf.Note, pf.Table)
-    blocks = [deepcopy(b).walk(_math_html, stop_if=lambda e: isinstance(e, stop)) for b in blocks]
+    blocks = [copy_element(b).walk(_math_html, stop_if=lambda e: isinstance(e, stop)) for b in blocks]
 
     def action(elem: pf.Element, _doc: pf.Doc):
         if isinstance(elem, pf.Table):
@@ -167,7 +166,7 @@ def table_to_html(table: pf.Table, note_label: Callable[[pf.Note], str], batch: 
         caption = list(table.caption.content)
         if len(caption) == 1 and isinstance(caption[0], pf.Para):
             # one paragraph is written bare, so it reads back as Plain like a `Table:` caption
-            caption = [pf.Plain(*deepcopy(list(caption[0].content)))]
+            caption = [pf.Plain(*[copy_element(i) for i in caption[0].content])]
         out.append(f"<caption>{_blocks_html(caption, note_label, batch)}</caption>")
     if table.head and table.head.content:
         out.append("<thead>")
@@ -193,7 +192,7 @@ _PIPE_RULE = {
 def _pipe_cell(cell: pf.TableCell, batch: CellBatch) -> str:
     if not cell.content:
         return ""
-    return batch.add([deepcopy(cell.content[0])])
+    return batch.add([copy_element(cell.content[0])])
 
 
 def table_to_pipe(table: pf.Table, batch: CellBatch) -> str:

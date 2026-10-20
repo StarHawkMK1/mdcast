@@ -334,3 +334,17 @@ def image_urls(doc: pf.Doc) -> list[str]:
     urls: list[str] = []
     doc.walk(lambda e, d: urls.append(e.url) if isinstance(e, pf.Image) else None)
     return urls
+
+
+def test_copy_element_copies_content_not_ancestors():
+    from mdcast.ast import clone, copy_element
+
+    # a loaded document has parent links (a hand-built one does not)
+    doc = clone(pf.Doc(*[pf.Para(pf.Str(str(i))) for i in range(3)], pf.Para(pf.Str("a"), pf.Note(pf.Para(pf.Str("n"))))))
+    para = doc.content[3]
+    copied = copy_element(para)
+    assert copied is not para and copied.content[1] is not para.content[1]
+    assert copied.to_json() == para.to_json()
+    assert copied.parent is doc  # the document itself was not copied
+    copied.content[0].text = "b"
+    assert pf.stringify(para).startswith("a")

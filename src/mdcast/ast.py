@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import tempfile
 from collections.abc import Sequence
+from copy import deepcopy
 from pathlib import Path
 
 import panflute as pf
@@ -26,6 +27,15 @@ def doc_to_json(doc: pf.Doc) -> str:
 
 def clone(doc: pf.Doc) -> pf.Doc:
     return json_to_doc(doc_to_json(doc))
+
+
+def copy_element(elem: pf.Element) -> pf.Element:
+    """Deep copy of one element and its content, not of its ancestors.
+
+    A plain ``deepcopy`` follows ``.parent`` and copies the whole document every time.
+    """
+    parent = elem.parent
+    return deepcopy(elem, {id(parent): parent} if parent is not None else None)
 
 
 def md_to_doc(text: str) -> pf.Doc:

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import re
-from copy import deepcopy
 from typing import Any
 
 import panflute as pf
 import yaml
 
-from mdcast.ast import QUIET, clone, convert_doc
+from mdcast.ast import QUIET, clone, convert_doc, copy_element
 from mdcast.writers.md.tables import (
     html_batch,
     is_simple_table,
@@ -59,12 +58,12 @@ def _caption_inlines(figure: pf.Figure) -> list[pf.Inline]:
 def _figure_blocks(figure: pf.Figure) -> list[pf.Block]:
     """A captioned figure becomes `![caption](path)`; extra content is kept as-is."""
     caption = _caption_inlines(figure)
-    blocks = [deepcopy(b) for b in figure.content]
+    blocks = [copy_element(b) for b in figure.content]
     images: list[pf.Image] = []
     for block in blocks:
         block.walk(lambda e, d: images.append(e) if isinstance(e, pf.Image) else None)
     if caption and len(images) == 1:
-        images[0].content = [deepcopy(i) for i in caption]
+        images[0].content = [copy_element(i) for i in caption]
     elif caption:
         blocks.append(pf.Para(*caption))
     return [pf.Para(*b.content) if isinstance(b, pf.Plain) else b for b in blocks]
