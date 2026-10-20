@@ -14,7 +14,7 @@ from helpers import build, make_reference_docx, tiny_bmp, tiny_jpeg, tiny_png
 from mdcast import pipeline
 from mdcast.report import Codes
 from mdcast.types import Format, Options, Source
-from mdcast.writers.images import localize_images
+from mdcast.writers.images import image_info, localize_images, webp_to_png
 
 
 def images(doc):
@@ -278,7 +278,7 @@ def test_check_hook_rejection_becomes_placeholder(tmp_path):
         ("pic.bmp", tiny_bmp(), "assets/img1.bmp"),
         ("crc.png", corrupt_png(), "assets/img1.png"),
         ("drawing.emf", b"\x01\x00\x00\x00" + bytes(80), "assets/img1.emf"),
-        ("noext", tiny_bmp(), "assets/img1.png"),
+        ("noext", tiny_bmp(), "assets/img1.bmp"),  # BMP is recognised by its bytes (M2b spec §5.1)
     ],
 )
 def test_docx_keeps_types_it_does_not_recognise(tmp_path, name, data, expected):
@@ -300,3 +300,44 @@ def test_bmp_is_embedded_in_docx_and_a_placeholder_in_pdf(tmp_path):
     assert "[이미지: 작은 그림]" in pdf[0].get_textpage().get_text_range()
     failed = [e.where.get("format") for e in result.report.events if e.code == Codes.IMAGE_FETCH_FAILED]
     assert failed == ["pdf"]
+
+
+def test_image_info_reads_sizes_and_dpi(tmp_path):
+    from PIL import Image as PILImage
+
+    cases = {}
+    for name, kwargs in {"a.png": {"dpi": (300, 300)}, "b.png": {}, "c.jpg": {"dpi": (72, 72)},
+                         "d.gif": {}, "e.bmp": {}, "f.webp": {}}.items():
+        path = tmp_path / name
+        PILImage.new("RGB", (40, 20), (1, 2, 3)).save(path, **kwargs)
+        cases[name] = image_info(path.read_bytes())
+    assert cases["a.png"] == ("png", 40, 20, 300.0)
+    assert cases["b.png"] == ("png", 40, 20, 96.0)
+    assert cases["c.jpg"] == ("jpg", 40, 20, 72.0)
+    assert cases["d.gif"][:3] == ("gif", 40, 20)
+    assert cases["e.bmp"][:3] == ("bmp", 40, 20)
+    assert cases["f.webp"][:3] == ("webp", 40, 20)
+
+
+@pytest.mark.parametrize("svg, size", [
+    ('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200"/>', (400, 200)),
+    ('<svg xmlns="http://www.w3.org/2000/svg" width="72pt" height="1in"/>', (96, 96)),
+    ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 60"/>', (120, 60)),
+    ('<svg xmlns="http://www.w3.org/2000/svg"/>', (300, 150)),
+])
+def test_image_info_reads_svg_sizes(svg, size):
+    assert image_info(svg.encode()) == ("svg", *size, 96.0)
+
+
+def test_image_info_rejects_unknown_bytes():
+    with pytest.raises(ValueError):
+        image_info(b"not an image")
+
+
+def test_webp_becomes_a_png_of_the_same_pixels(tmp_path):
+    from PIL import Image as PILImage
+
+    path = tmp_path / "x.webp"
+    PILImage.new("RGB", (40, 20), (1, 2, 3)).save(path)
+    png = webp_to_png(path.read_bytes(), 40, tmp_path)
+    assert image_info(png)[:3] == ("png", 40, 20)

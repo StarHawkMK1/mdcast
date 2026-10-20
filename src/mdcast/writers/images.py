@@ -117,9 +117,139 @@ def _extension(data: bytes, named: str, strict: bool) -> str:
         return ".webp"
     if _SVG_START.match(data[:4096]):
         return ".svg"
+    if data[:2] == b"BM" and not strict:
+        return ".bmp"
     if strict:
         raise _ImageError("지원하지 않는 이미지 형식입니다 (PNG, JPEG, GIF, WebP, SVG 만 지원)")
     return named or ".png"
+
+
+_SVG_UNITS = {"": 1.0, "px": 1.0, "pt": 96 / 72, "mm": 96 / 25.4, "cm": 96 / 2.54, "in": 96.0}
+_SVG_LENGTH = re.compile(r"\s*([0-9]*\.?[0-9]+)\s*(px|pt|mm|cm|in)?\s*$")
+_SVG_ROOT = re.compile(rb"<svg\b([^>]*)>", re.IGNORECASE | re.DOTALL)
+
+
+def _svg_attr(attrs: str, name: str) -> str | None:
+    match = re.search(rf"""(?:^|\s){name}\s*=\s*(["'])(.*?)\1""", attrs, re.DOTALL)
+    return match.group(2) if match else None
+
+
+def _svg_size(data: bytes) -> tuple[int, int]:
+    """Root ``width``/``height`` (px at 96 dpi), else the ``viewBox`` size, else 300x150."""
+    root = _SVG_ROOT.search(data[:65536])
+    attrs = root.group(1).decode("utf-8", "replace") if root else ""
+
+    def length(name: str) -> float | None:
+        value = _svg_attr(attrs, name)
+        match = _SVG_LENGTH.match(value) if value else None
+        return float(match.group(1)) * _SVG_UNITS[match.group(2) or ""] if match else None
+
+    width, height = length("width"), length("height")
+    if width and height:
+        return round(width), round(height)
+    box = (_svg_attr(attrs, "viewBox") or "").replace(",", " ").split()
+    try:
+        if len(box) == 4 and float(box[2]) > 0 and float(box[3]) > 0:
+            return round(float(box[2])), round(float(box[3]))
+    except ValueError:
+        pass
+    return 300, 150
+
+
+def _jpeg_info(data: bytes) -> tuple[int, int, float]:
+    dpi = 0.0
+    pos = 2
+    while pos + 4 <= len(data):
+        if data[pos] != 0xFF:
+            pos += 1
+            continue
+        marker = data[pos + 1]
+        if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+            pos += 2
+            continue
+        length = int.from_bytes(data[pos + 2 : pos + 4], "big")
+        segment = data[pos + 4 : pos + 2 + length]
+        if marker == 0xE0 and segment[:5] == b"JFIF\x00" and len(segment) >= 12:
+            unit, density = segment[7], int.from_bytes(segment[8:10], "big")
+            dpi = density if unit == 1 else density * 2.54 if unit == 2 else 0.0
+        elif 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC) and len(segment) >= 5:
+            height, width = int.from_bytes(segment[1:3], "big"), int.from_bytes(segment[3:5], "big")
+            return width, height, dpi
+        pos += 2 + length
+    raise ValueError("JPEG 크기를 찾지 못했습니다")
+
+
+def _png_dpi(data: bytes) -> float:
+    pos = 8
+    while pos + 12 <= len(data):
+        length = int.from_bytes(data[pos : pos + 4], "big")
+        kind = data[pos + 4 : pos + 8]
+        if kind == b"pHYs" and length >= 9:
+            ppm = int.from_bytes(data[pos + 8 : pos + 12], "big")
+            return round(ppm * 0.0254) if data[pos + 16] == 1 else 0.0
+        if kind in (b"IDAT", b"IEND"):
+            break
+        pos += 12 + length
+    return 0.0
+
+
+def _webp_size(data: bytes) -> tuple[int, int]:
+    chunk = data[12:16]
+    if chunk == b"VP8X":
+        return int.from_bytes(data[24:27], "little") + 1, int.from_bytes(data[27:30], "little") + 1
+    if chunk == b"VP8L":
+        bits = int.from_bytes(data[21:25], "little")
+        return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+    if chunk == b"VP8 ":
+        return int.from_bytes(data[26:28], "little") & 0x3FFF, int.from_bytes(data[28:30], "little") & 0x3FFF
+    raise ValueError("WebP 크기를 찾지 못했습니다")
+
+
+def image_info(data: bytes) -> tuple[str, int, int, float]:
+    """(format, width px, height px, dpi) of PNG, JPEG, GIF, BMP, WebP or SVG bytes; dpi 96 when unknown.
+
+    Raises ``ValueError`` for anything else or a header too short to read.
+    """
+    try:
+        if data.startswith(b"\x89PNG\r\n\x1a\n") and data[12:16] == b"IHDR":
+            kind, width, height = "png", int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+            dpi = _png_dpi(data)
+        elif data.startswith(b"\xff\xd8\xff"):
+            kind, (width, height, dpi) = "jpg", _jpeg_info(data)
+        elif data[:6] in (b"GIF87a", b"GIF89a"):
+            kind, width, height, dpi = "gif", int.from_bytes(data[6:8], "little"), int.from_bytes(data[8:10], "little"), 0.0
+        elif data[:2] == b"BM" and len(data) >= 26:
+            kind, width = "bmp", int.from_bytes(data[18:22], "little", signed=True)
+            height = abs(int.from_bytes(data[22:26], "little", signed=True))
+            ppm = int.from_bytes(data[38:42], "little") if len(data) >= 42 else 0
+            dpi = round(ppm * 0.0254)
+        elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            kind, (width, height), dpi = "webp", _webp_size(data), 0.0
+        elif _SVG_START.match(data[:4096]):
+            kind, (width, height), dpi = "svg", _svg_size(data), 0.0
+        else:
+            raise ValueError("알 수 없는 이미지 형식입니다")
+    except IndexError as exc:
+        raise ValueError("이미지 머리가 잘렸습니다") from exc
+    if width <= 0 or height <= 0:
+        raise ValueError("이미지 크기가 0 입니다")
+    return kind, width, height, float(dpi) if dpi and dpi > 0 else 96.0
+
+
+def webp_to_png(data: bytes, width_px: int, work_dir: Path) -> bytes:
+    """The WebP as a PNG of the same pixels, drawn by Typst (Hangul cannot place WebP, appendix B-11)."""
+    import typst
+
+    folder = work_dir / "webp"
+    folder.mkdir(parents=True, exist_ok=True)
+    name = f"{len(list(folder.glob('*.webp'))) + 1}.webp"
+    (folder / name).write_bytes(data)
+    main = folder / f"{name}.typ"
+    main.write_text(
+        f'#set page(width: auto, height: auto, margin: 0pt)\n#image("{name}", width: {width_px * 0.75}pt)\n',
+        encoding="utf-8",
+    )
+    return typst.compile(str(main), root=str(folder), format="png", ppi=96.0, ignore_system_fonts=True)
 
 
 def _caption_inlines(figure: pf.Figure) -> list[pf.Inline]:

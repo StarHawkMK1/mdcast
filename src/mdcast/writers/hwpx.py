@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
 import panflute as pf
+import typst
 
 from mdcast import hwpx
 from mdcast.counters import format_counter
@@ -15,6 +17,7 @@ from mdcast.report import Codes
 from mdcast.units import normalize_color, page_size_mm, parse_length_mm, parse_pt, parse_ratio
 from mdcast.writers.context import RenderError, WriterContext
 from mdcast.writers.generator import generator_values
+from mdcast.writers.images import image_info, localize_images, webp_to_png
 
 # what the PDF uses where the built-in template leaves a key empty (spec §4.3), so Hangul's
 # blank-document defaults (outline indents, justified text, …) do not leak into the output
@@ -200,8 +203,44 @@ def _settings(ctx: WriterContext, custom: bool) -> hwpx.Settings:
     )
 
 
-def _write(doc: pf.Doc, container: bytes, ctx: WriterContext, custom: bool) -> bytes:
-    data, notices = hwpx.write(doc, container, _settings(ctx, custom))
+HWPX_IMAGES = ("png", "jpg", "gif", "bmp", "svg")  # what Hangul places as is (appendix B-11)
+
+
+def _load_images(doc: pf.Doc, ctx: WriterContext) -> tuple[pf.Doc, dict[str, hwpx.Image]]:
+    """Local copies of the document's images as hwpx pictures; WebP becomes PNG (spec §5.1).
+
+    An image Hangul cannot place or whose size cannot be read becomes the usual placeholder
+    with an IMAGE_FETCH_FAILED warning (``localize_images``).
+    """
+
+    def check(path: str) -> str | None:
+        file = ctx.work_dir / path
+        try:
+            data = file.read_bytes()
+            kind, width, _, _ = image_info(data)
+            if kind == "webp":
+                file.write_bytes(webp_to_png(data, width, ctx.work_dir))
+                return None
+        except (ValueError, OSError, typst.TypstError):
+            return "크기를 읽을 수 없는 이미지입니다"
+        return None if kind in HWPX_IMAGES else f"한글이 넣을 수 없는 이미지 형식입니다: {kind}"
+
+    doc = localize_images(doc, ctx, check=check)
+    images: dict[str, hwpx.Image] = {}
+
+    def collect(elem: pf.Element, _doc: pf.Doc):
+        if isinstance(elem, pf.Image) and elem.url not in images:
+            data = (ctx.work_dir / elem.url).read_bytes()
+            kind, width, height, dpi = image_info(data)
+            images[elem.url] = hwpx.Image(data, kind, width, height, dpi)
+
+    doc.walk(collect)
+    return doc, images
+
+
+def _write(doc: pf.Doc, container: bytes, ctx: WriterContext, custom: bool, images: dict[str, hwpx.Image]) -> bytes:
+    settings = replace(_settings(ctx, custom), images=images)
+    data, notices = hwpx.write(doc, container, settings)
     for notice in notices:
         if notice.kind == "style-missing":
             ctx.report.info(Codes.STYLE_UNMAPPED, notice.message, format="hwpx", element=notice.element)
@@ -211,10 +250,11 @@ def _write(doc: pf.Doc, container: bytes, ctx: WriterContext, custom: bool) -> b
 
 
 def write_hwpx(doc: pf.Doc, ctx: WriterContext) -> bytes:
+    doc, images = _load_images(doc, ctx)
     container = ctx.template.container_for("hwpx")
     if container.source == "custom" and container.path is not None:
         try:
-            return _write(doc, container.path.read_bytes(), ctx, custom=True)
+            return _write(doc, container.path.read_bytes(), ctx, custom=True, images=images)
         except Exception as exc:  # noqa: BLE001 - any odd container: the built-in one still works
             ctx.report.warn(
                 Codes.TEMPLATE_INVALID,
@@ -223,6 +263,6 @@ def write_hwpx(doc: pf.Doc, ctx: WriterContext) -> bytes:
             )
     builtin = ctx.template.builtin_container("hwpx")
     try:
-        return _write(doc, builtin.path.read_bytes(), ctx, custom=False)
+        return _write(doc, builtin.path.read_bytes(), ctx, custom=False, images=images)
     except (hwpx.ContainerError, OSError) as exc:
         raise RenderError(f"내장 hwpx 그릇을 쓸 수 없습니다: {exc}") from exc

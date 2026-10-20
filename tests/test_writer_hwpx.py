@@ -1,12 +1,12 @@
 from helpers import HWPX_NS as NS
-from helpers import build, builtin_hwpx, hwpx_integrity, write_template
+from helpers import build, builtin_hwpx, hwpx_integrity, tiny_bmp, write_template
 
 from mdcast import hwpx, pipeline
 from mdcast.hwpx import Package
 from mdcast.report import Codes, Level
 from mdcast.templates import validate_template
 from mdcast.types import Format, Options, Source
-from mdcast.writers.hwpx import _settings, write_hwpx
+from mdcast.writers.hwpx import _load_images, _settings, write_hwpx
 
 
 def render(tmp_path, md, template=None):
@@ -147,3 +147,14 @@ def test_custom_container_still_gets_variant_table_looks(tmp_path):
     assert settings.tables["제출양식"].header_background == "#E5E5E5"
     assert settings.tables[None].border_outer == hwpx.Border(1.0, "#000000")
     assert settings.figure_max_ratio is None and settings.figure_max_mm == 120.0
+
+
+def test_hwpx_images_are_loaded_converted_or_replaced(tmp_path):
+    from PIL import Image as PILImage
+
+    PILImage.new("RGB", (40, 20)).save(tmp_path / "w.webp")
+    (tmp_path / "t.bmp").write_bytes(tiny_bmp())
+    doc, ctx = build(tmp_path, "![w](w.webp) ![b](t.bmp) ![x](none.png)\n", Format.HWPX)
+    doc, images = _load_images(doc, ctx)
+    assert sorted(image.ext for image in images.values()) == ["bmp", "png"]
+    assert [e.code for e in ctx.report.events].count(Codes.IMAGE_FETCH_FAILED) == 1
