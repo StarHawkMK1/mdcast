@@ -123,7 +123,10 @@ def test_hand_written_encoded_image_paths_still_export(tmp_path):
 
     for name in ("my pic.png", "50%.png", "a(1).png"):
         (tmp_path / name).write_bytes(tiny_png())
-    md = "![a](my%20pic.png)\n\n![b](50%25.png)\n\n![c](50%.png)\n\n![d](a(1).png)\n\n![e](a%281%29.png)\n"
+    md = (
+        "![a](my%20pic.png)\n\n![b](50%25.png)\n\n![c](50%.png)\n\n![d](a(1).png)\n\n![e](a%281%29.png)\n\n"
+        '<table><tr><td><img src="my%20pic.png" alt="f"></td><td><img src="50%25.png" alt="g"></td></tr></table>\n'
+    )
     res = convert(Source(md.encode(), "a.md", Format.MD, base_dir=tmp_path), [Format.DOCX])
     assert res.outputs[0].data is not None
     assert not [e for e in res.report.events if e.code == Codes.IMAGE_FETCH_FAILED]
