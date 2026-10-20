@@ -341,3 +341,9 @@ def test_webp_becomes_a_png_of_the_same_pixels(tmp_path):
     PILImage.new("RGB", (40, 20), (1, 2, 3)).save(path)
     png = webp_to_png(path.read_bytes(), 40, tmp_path)
     assert image_info(png)[:3] == ("png", 40, 20)
+
+
+@pytest.mark.parametrize("data", [b"BM" + b"x" * 100, b"BM" + bytes(60), b"\x89PNG\r\n\x1a\n" + (13).to_bytes(4, "big") + b"IHDR" + (10**6).to_bytes(4, "big") * 2 + bytes(5)])
+def test_image_info_rejects_fake_bmp_and_absurd_sizes(data):
+    with pytest.raises(ValueError):
+        image_info(data)

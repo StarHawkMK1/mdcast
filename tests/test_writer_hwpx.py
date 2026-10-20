@@ -1,5 +1,13 @@
 from helpers import HWPX_NS as NS
-from helpers import build, builtin_hwpx, hwpx_integrity, tiny_bmp, write_template
+from helpers import (
+    build,
+    builtin_hwpx,
+    hwpx_integrity,
+    tiny_bmp,
+    tiny_jpeg,
+    tiny_png,
+    write_template,
+)
 
 from mdcast import hwpx, pipeline
 from mdcast.hwpx import Package
@@ -159,3 +167,13 @@ def test_hwpx_images_are_loaded_converted_or_replaced(tmp_path):
     doc, images = _load_images(doc, ctx)
     assert sorted(image.ext for image in images.values()) == ["bmp", "png"]
     assert [e.code for e in ctx.report.events].count(Codes.IMAGE_FETCH_FAILED) == 1
+
+
+def test_damaged_images_become_placeholders_in_hwpx(tmp_path):
+    (tmp_path / "cut.png").write_bytes(tiny_png()[:45])
+    (tmp_path / "cut.jpg").write_bytes(tiny_jpeg()[:-20])
+    (tmp_path / "fake.bmp").write_bytes(b"BM" + b"not really a bitmap" * 5)
+    doc, ctx = build(tmp_path, "![a](cut.png) ![b](cut.jpg) ![c](fake.bmp)\n", Format.HWPX)
+    _, images = _load_images(doc, ctx)
+    assert images == {}
+    assert [e.code for e in ctx.report.events].count(Codes.IMAGE_FETCH_FAILED) == 3

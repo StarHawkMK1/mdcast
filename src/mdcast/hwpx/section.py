@@ -316,6 +316,8 @@ class SectionWriter:
             marker_ctx = replace(ctx, extra=marker_left - base, tight=isinstance(first, pf.Plain))
             para = self._para_id(ctx.element, marker_ctx, hanging=hanging, tab_pr=self.header.auto_tab())
             paragraph = self.paragraph(ctx.element, ctx, para)
+            # the item's text starts after the marker: a picture there may only take the rest
+            paragraph.room = max(ctx.width - text_left, _MIN_WIDTH_MM)
             paragraph.text(char, self.settings.list_marker(ordered, level, start + offset))
             paragraph.mark(char, "tab")
             if isinstance(first, (pf.Para, pf.Plain)):

@@ -107,3 +107,12 @@ def test_write_registers_bindata_and_manifest(tmp_path):
     item_id = pic.find("hc:img", NS).get("binaryItemIDRef")
     hrefs = {i.get("id"): i.get("href") for i in parts["Contents/content.hpf"].iter(f"{{{NS['opf']}}}item")}
     assert hrefs[item_id].startswith("BinData/mdcastimg")
+
+
+@pytest.mark.parametrize("md", ["- 글 ![a](w.png)\n", "10. 글 ![a](w.png)\n", "- 바깥\n    - 안 ![a](w.png)\n"])
+def test_picture_in_a_list_items_first_paragraph_fits_after_the_marker(md):
+    wide = Image(data=b"w", ext="png", width_px=4000, height_px=1000)
+    _, _, paragraphs, _ = hwpx_render(md, hwpx_settings(images={"w.png": wide}))
+    p = next(p for p in paragraphs if p.find(".//hp:pic", NS) is not None)
+    width = int(p.find(".//hp:pic/hp:sz", NS).get("width"))
+    assert width <= hwpunit(170.0 - 3.0)  # the item text starts at least 3mm (the narrowest hanging) in

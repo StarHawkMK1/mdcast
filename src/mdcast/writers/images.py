@@ -117,11 +117,24 @@ def _extension(data: bytes, named: str, strict: bool) -> str:
         return ".webp"
     if _SVG_START.match(data[:4096]):
         return ".svg"
-    if data[:2] == b"BM" and not strict:
+    if _is_bmp(data) and not strict:
         return ".bmp"
     if strict:
         raise _ImageError("지원하지 않는 이미지 형식입니다 (PNG, JPEG, GIF, WebP, SVG 만 지원)")
     return named or ".png"
+
+
+MAX_IMAGE_PX = 65535  # larger sides are not real pictures and overflow Hangul's sizes
+_BMP_HEADERS = (12, 40, 52, 56, 108, 124)  # DIB header sizes
+
+
+def _is_bmp(data: bytes) -> bool:
+    """``BM``, a known DIB header size and one colour plane, so text that starts with BM is not taken."""
+    return (
+        data[:2] == b"BM" and len(data) >= 30
+        and int.from_bytes(data[14:18], "little") in _BMP_HEADERS
+        and int.from_bytes(data[26:28] if data[14] != 12 else data[22:24], "little") == 1
+    )
 
 
 _SVG_UNITS = {"": 1.0, "px": 1.0, "pt": 96 / 72, "mm": 96 / 25.4, "cm": 96 / 2.54, "in": 96.0}
@@ -218,7 +231,7 @@ def image_info(data: bytes) -> tuple[str, int, int, float]:
             kind, (width, height, dpi) = "jpg", _jpeg_info(data)
         elif data[:6] in (b"GIF87a", b"GIF89a"):
             kind, width, height, dpi = "gif", int.from_bytes(data[6:8], "little"), int.from_bytes(data[8:10], "little"), 0.0
-        elif data[:2] == b"BM" and len(data) >= 26:
+        elif _is_bmp(data):
             kind, width = "bmp", int.from_bytes(data[18:22], "little", signed=True)
             height = abs(int.from_bytes(data[22:26], "little", signed=True))
             ppm = int.from_bytes(data[38:42], "little") if len(data) >= 42 else 0
@@ -231,9 +244,22 @@ def image_info(data: bytes) -> tuple[str, int, int, float]:
             raise ValueError("알 수 없는 이미지 형식입니다")
     except IndexError as exc:
         raise ValueError("이미지 머리가 잘렸습니다") from exc
-    if width <= 0 or height <= 0:
+    if not (0 < width <= MAX_IMAGE_PX and 0 < height <= MAX_IMAGE_PX):
         raise ValueError("이미지 크기가 0 입니다")
     return kind, width, height, float(dpi) if dpi and dpi > 0 else 96.0
+
+
+def image_complete(kind: str, data: bytes) -> bool:
+    """Whether the file runs to its end marker (a cut download or copy otherwise shows half a picture)."""
+    if kind == "png":
+        return _png_complete(data)
+    if kind == "jpg":
+        return b"\xff\xd9" in data[-1024:]
+    if kind == "gif":
+        return data.rstrip(b"\x00").endswith(b";")
+    if kind == "bmp":
+        return int.from_bytes(data[2:6], "little") <= len(data)
+    return True
 
 
 def webp_to_png(data: bytes, width_px: int, work_dir: Path) -> bytes:

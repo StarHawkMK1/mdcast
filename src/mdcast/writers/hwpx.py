@@ -17,7 +17,7 @@ from mdcast.report import Codes
 from mdcast.units import normalize_color, page_size_mm, parse_length_mm, parse_pt, parse_ratio
 from mdcast.writers.context import RenderError, WriterContext
 from mdcast.writers.generator import generator_values
-from mdcast.writers.images import image_info, localize_images, webp_to_png
+from mdcast.writers.images import image_complete, image_info, localize_images, webp_to_png
 
 # what the PDF uses where the built-in template leaves a key empty (spec §4.3), so Hangul's
 # blank-document defaults (outline indents, justified text, …) do not leak into the output
@@ -218,6 +218,8 @@ def _load_images(doc: pf.Doc, ctx: WriterContext) -> tuple[pf.Doc, dict[str, hwp
         try:
             data = file.read_bytes()
             kind, width, _, _ = image_info(data)
+            if not image_complete(kind, data):
+                return "이미지 파일이 손상되었습니다"
             if kind == "webp":
                 file.write_bytes(webp_to_png(data, width, ctx.work_dir))
                 return None
