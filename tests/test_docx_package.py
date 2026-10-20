@@ -11,7 +11,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
 from docx_builder import add_page_break, add_para, docx_bytes, strip_mdcast_metadata
-from helpers import export, write_template
+from helpers import export, tiny_png, write_template
 from mdcast.ast import json_to_doc
 from mdcast.readers.docx_package import PAGEBREAK_SENTINEL, prepare_docx
 from mdcast.types import Format
@@ -95,6 +95,14 @@ def test_source_text_excludes_sentinels_and_includes_notes():
 def test_no_header_footer_or_comments_in_plain_docx():
     p = prepare_docx(docx_bytes(lambda d: add_para(d, "x")))
     assert not p.has_header_footer and not p.has_comments and p.table_styles == []
+
+
+def test_image_only_header_counts_as_header_content():
+    def build(d):
+        add_para(d, "본문")
+        d.sections[0].header.paragraphs[0].add_run().add_picture(io.BytesIO(tiny_png()))
+
+    assert prepare_docx(docx_bytes(build)).has_header_footer
 
 
 def test_table_variant_survives_in_table_styles(tmp_path):

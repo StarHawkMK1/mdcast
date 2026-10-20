@@ -146,7 +146,9 @@ def _inject_styles(styles: etree._Element) -> None:
 
 
 def _has_content(root: etree._Element) -> bool:
-    return bool(_texts(root)) or next(root.iter(_w("fldSimple"), _w("instrText")), None) is not None
+    if _texts(root):
+        return True
+    return next(root.iter(_w("fldSimple"), _w("instrText"), _w("drawing"), _w("pict"), _w("object")), None) is not None
 
 
 def _generator(blob: bytes) -> dict[str, str]:
