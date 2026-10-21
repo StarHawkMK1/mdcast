@@ -39,18 +39,13 @@ _CTRL, _SUB, _EQUATION, _SCRIPT = hp("ctrl"), hp("subList"), hp("equation"), hp(
 _NOTES = (hp("footNote"), hp("endNote"))
 _FIELD_BEGIN, _FIELD_END = hp("fieldBegin"), hp("fieldEnd")
 # paragraphs under these are not body text: page headers and footers, memos (in a MEMO field or
-# a memo group), anything else a field carries
-_NOT_BODY = (hp("header"), hp("footer"), hp("memo"), hp("memogroup"), _FIELD_BEGIN)
+# a memo group), hidden comments, anything else a field carries
+_NOT_BODY = (hp("header"), hp("footer"), hp("memo"), hp("memogroup"), hp("hiddenComment"), _FIELD_BEGIN)
 # what IMPORT_HEADER_SKIPPED reports (with MEMO fields): page headers and footers, memos, tracked changes
-_SKIPPED = (
-    hp("header"),
-    hp("footer"),
-    hp("memo"),
-    hp("memogroup"),
-    hp("insertBegin"),
-    hp("deleteBegin"),
-)
+_SKIPPED = (hp("header"), hp("footer"), hp("memo"), hp("memogroup"))
+_TRACKED = (hp("insertBegin"), hp("deleteBegin"))
 _SKIPPED_MESSAGE = "머리말·꼬리말·메모는 가져오지 않습니다"
+_TRACKED_MESSAGE = "변경 추적은 받아들인 상태로 가져옵니다"
 _SYMBOLS_MESSAGE = "기호 글꼴 글자 {}개를 보이는 기호로 바꿨습니다"
 _SYMBOLS_LEFT = " (바꾸지 못한 글자 {}개는 그대로 둡니다)"
 _SYMBOLS_ONLY_LEFT = "기호 글꼴 글자 {}개는 보이는 기호로 바꾸지 못해 그대로 둡니다"
@@ -433,6 +428,7 @@ class BodyReader:
         self.hints = bool(pkg.generator)
         self.assets = assets  # None: pictures link to their BinData file name, nothing is written
         self._small: dict[int, pf.Image] = {}  # pictures that may have been text (IMPORT_IMAGE_TEXT)
+        self.has_tracked = any(next(section.iter(*_TRACKED), None) is not None for section in pkg.sections)
         # tracked changes read as accepted: deleted text leaves the XML before anything reads it
         # (paired across the paragraphs of a section, and of each cell, note or caption)
         for section in pkg.sections:
@@ -490,8 +486,11 @@ class BodyReader:
 
     def report_skipped(self) -> None:
         """One info when the document has page headers or footers, memos or tracked changes."""
-        if self.has_skipped:
-            self.report.info(Codes.IMPORT_HEADER_SKIPPED, _SKIPPED_MESSAGE)
+        parts = [_SKIPPED_MESSAGE] if self.has_skipped else []
+        if self.has_tracked:
+            parts.append(_TRACKED_MESSAGE)
+        if parts:
+            self.report.info(Codes.IMPORT_HEADER_SKIPPED, ". ".join(parts))
 
     def blocks(self) -> list[pf.Block]:
         return self.paragraphs(

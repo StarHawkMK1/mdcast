@@ -701,6 +701,7 @@ def test_list_item_of_only_a_table_or_page_break_survives_md_round_trip():
 # notes, equations, headers, memos, fields and tracked changes (Task 5) --------------------------
 
 _SKIPPED = "머리말·꼬리말·메모는 가져오지 않습니다"  # the docx reader's IMPORT_HEADER_SKIPPED message
+_TRACKED = "변경 추적은 받아들인 상태로 가져옵니다"
 _SUB_OPEN = '<hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP">'
 
 
@@ -872,6 +873,15 @@ def test_memo_dropped_with_info():
     assert skipped(report) == [_SKIPPED]
 
 
+def test_hidden_comment_is_left_out_like_a_memo():
+    hidden = _ctrl(f"<hp:hiddenComment>{_SUB_OPEN}{p(run('숨은 설명'))}</hp:subList></hp:hiddenComment>")
+    imported, _ = _read(p(run("앞 "), hidden, run("뒤")))
+    assert [text(b) for b in imported.doc.content] == ["앞 뒤"]
+    assert imported.source_text == ["앞 뒤"]
+    data = hwpx_bytes(p(run("앞 "), hidden, run("뒤")))
+    assert convert(Source(data, "a.hwpx", Format.HWPX), [Format.MD]).report.coverage == 1.0
+
+
 def test_tracked_deletion_is_left_out_of_body_and_source_text():
     imported, report = _read(
         p(
@@ -886,7 +896,9 @@ def test_tracked_deletion_is_left_out_of_body_and_source_text():
     assert [text(b) for b in imported.doc.content] == ["남김 끝 넣은 글", "가나", "다라"]
     assert kinds(imported.doc.content[0].content) == ["Str", "Space", "Str", "Space", "Str", "Space", "Str"]
     assert imported.source_text == ["남김 끝 넣은 글", "가나", "다라"]
-    assert skipped(report) == [_SKIPPED]
+    assert skipped(report) == [_TRACKED]  # no header, footer or memo here
+    _, both = _read(p(page_part("header", p(run("머리 글"))), t('<hp:insertBegin Id="1" TcId="1" paraend="0"/>글')))
+    assert skipped(both) == [f"{_SKIPPED}. {_TRACKED}"]
 
 
 def test_tracked_deletion_across_paragraphs_is_left_out():
