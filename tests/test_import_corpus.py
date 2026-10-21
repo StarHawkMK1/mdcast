@@ -1,4 +1,4 @@
-"""Real-document import checks, local only (M3a §9).
+"""Real-document import checks, local only (M3a §9, M3b §9).
 
 The corpus holds personal data: assert numbers only and never print, save or snapshot its text.
 Every count is computed into plain ints first so a failure message shows numbers, not content.
@@ -7,20 +7,24 @@ Every count is computed into plain ints first so a failure message shows numbers
 from __future__ import annotations
 
 import contextlib
+import io
 import logging
 import os
 import re
 import sys
 import tempfile
 import warnings
+import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 
 import panflute as pf
 import pytest
+from lxml import etree
 
 from mdcast.ast import docx_to_doc
 from mdcast.pipeline import convert
+from mdcast.readers.hwpx import read_hwpx
 from mdcast.readers.md import read_md
 from mdcast.report import Codes, Level, Report
 from mdcast.types import Format, Options, Source
@@ -31,14 +35,18 @@ _TOP = re.compile(r"^\d+\. ")
 _SUB = re.compile(r"^\d+\.\d+")
 
 
-def _corpus_file() -> Path:
+def _find(pattern: str) -> Path:
     root = os.environ.get("MDCAST_CORPUS_DIR")
     if not root:
         pytest.skip("MDCAST_CORPUS_DIR not set")
-    found = sorted(Path(root).glob("*시험합의서*.docx"))
+    found = sorted(Path(root).glob(pattern))
     if not found:
-        pytest.skip("no 시험합의서 docx in MDCAST_CORPUS_DIR")
+        pytest.skip(f"no {pattern} in MDCAST_CORPUS_DIR")
     return found[0]
+
+
+def _corpus_file() -> Path:
+    return _find("*시험합의서*.docx")
 
 
 def _all(doc: pf.Doc, cls: type) -> list:
@@ -50,6 +58,12 @@ def _all(doc: pf.Doc, cls: type) -> list:
 def _spans(doc: pf.Doc) -> tuple[int, int]:
     cells = _all(doc, pf.TableCell)
     return sum(c.rowspan > 1 for c in cells), sum(c.colspan > 1 for c in cells)
+
+
+def _dims(table: pf.Table) -> tuple[int, int]:
+    rows = len(table.head.content) if table.head else 0
+    rows += sum(len(body.head) + len(body.content) for body in table.content)
+    return rows, len(table.colspec)
 
 
 def _heading_counts(doc: pf.Doc) -> dict[str, int]:
@@ -87,21 +101,27 @@ def _measure(data: bytes) -> dict[str, int]:
         "image_text": sum(1 for e in events if e.code == Codes.IMPORT_IMAGE_TEXT),
         "text_missing": sum(1 for e in events if e.code == Codes.IMPORT_TEXT_MISSING),
         "coverage_permille": round((result.report.coverage or 0) * 1000),
+        "unwrapped": sum(1 for e in events if e.code == Codes.IMPORT_TABLE_UNWRAPPED),
+        "tables_11x2": sum(1 for t in _all(back, pf.Table) if _dims(t) == (11, 2)),
         **_heading_counts(back),
     }
+    counts["reexport_ok"], counts["reexport_errors"] = _reexport(md, out.assets, Format.DOCX)
+    return counts
+
+
+def _reexport(md: bytes, assets: dict[str, bytes], target: Format) -> tuple[int, int]:
+    """(1 if the MD exported to ``target``, number of error events)."""
     with tempfile.TemporaryDirectory() as tmp:  # the pictures may hold form text: never keep them
         base = Path(tmp)
-        for name, blob in out.assets.items():
+        for name, blob in assets.items():
             (base / name).parent.mkdir(parents=True, exist_ok=True)
             (base / name).write_bytes(blob)
         again = convert(
             Source(md, "x.md", Format.MD, base_dir=base),
-            [Format.DOCX],
+            [target],
             options=Options(offline=True, cwd=base, home=base / "home"),
         )
-        counts["reexport_ok"] = int(again.outputs[0].data is not None)
-        counts["reexport_errors"] = sum(1 for e in again.report.events if e.level is Level.ERROR)
-    return counts
+        return int(again.outputs[0].data is not None), sum(1 for e in again.report.events if e.level is Level.ERROR)
 
 
 @contextlib.contextmanager
@@ -143,6 +163,9 @@ def test_corpus_document_numbers():
         "image_text": 10,
         "text_missing": 0,
         "coverage_permille": 1000,
+        # the 2×11 table (11 rows, 2 columns) is not a label | content form: it stays a table (D18)
+        "unwrapped": 0,
+        "tables_11x2": 1,
         "top": 14,
         "top_level_kinds": 1,
         "sub_one_below_top": 1,
@@ -154,3 +177,192 @@ def test_corpus_document_numbers():
     assert {k: counts[k] for k in expected} == expected
     assert counts["notes"] >= 1
     assert counts["sub"] >= 1
+
+
+# --- hwpx (M3b §9) -------------------------------------------------------------------------------
+
+_HP = "{http://www.hancom.co.kr/hwpml/2011/paragraph}"
+_SECTION = re.compile(r"Contents/section\d+\.xml")
+_NUMBER = re.compile(r"\d+")
+
+
+def _source_tables(data: bytes) -> dict[str, int]:
+    """``hp:tbl`` and merged ``hp:cellSpan`` counts (cells, and the span sizes summed) of the package."""
+    counts = dict.fromkeys(("src_tables", "src_rowspan", "src_colspan", "src_rowspan_sum", "src_colspan_sum"), 0)
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        for name in archive.namelist():
+            if not _SECTION.fullmatch(name):
+                continue
+            root = etree.fromstring(archive.read(name))
+            counts["src_tables"] += sum(1 for _ in root.iter(f"{_HP}tbl"))
+            for span in root.iter(f"{_HP}cellSpan"):
+                rows, cols = int(span.get("rowSpan", "1")), int(span.get("colSpan", "1"))
+                counts["src_rowspan"] += rows > 1
+                counts["src_colspan"] += cols > 1
+                counts["src_rowspan_sum"] += rows if rows > 1 else 0
+                counts["src_colspan_sum"] += cols if cols > 1 else 0
+    return counts
+
+
+def _in_cell(elem: pf.Element) -> bool:
+    return any(isinstance(a, pf.TableCell) for a in _ancestors(elem))
+
+
+def _ancestors(elem: pf.Element) -> Iterator[pf.Element]:
+    while elem.parent is not None:
+        elem = elem.parent
+        yield elem
+
+
+def _starting(texts: list[str], mark: str) -> int:
+    return sum(1 for t in texts if t.lstrip().startswith(mark))
+
+
+def _event_number(events: list, code: str) -> int:
+    """The count an info event states in its own (mdcast) wording, e.g. 「… 16개를 …」; 0 without the event."""
+    found = [int(n) for e in events if e.code == code for n in _NUMBER.findall(e.message)[:1]]
+    return sum(found)
+
+
+def _hwpx_measure(data: bytes) -> dict[str, int]:
+    source = Source(data, "x.hwpx", Format.HWPX)
+    result = convert(source, [Format.MD])
+    out, events = result.outputs[0], result.report.events
+    md = out.data
+    back = read_md(Source(md, "x.md", Format.MD), Report("x.md", Format.MD)).doc
+    read = read_hwpx(source, Report("x.hwpx", Format.HWPX), "x_assets")
+    cells = _all(back, pf.TableCell)
+    images = _all(back, pf.Image)
+    bullets = [item for lst in _all(back, pf.BulletList) if _in_cell(lst) for item in lst.content]
+    loose = [pf.stringify(b) for b in _all(back, (pf.Para, pf.Plain)) if not isinstance(b.parent, pf.ListItem)]
+    counts = {
+        "coverage_permille": round((result.report.coverage or 0) * 1000),
+        "errors": sum(1 for e in events if e.level is Level.ERROR),
+        "text_missing": sum(1 for e in events if e.code == Codes.IMPORT_TEXT_MISSING),
+        "unwrapped": sum(1 for e in events if e.code == Codes.IMPORT_TABLE_UNWRAPPED),
+        "symbol_events": sum(1 for e in events if e.code == Codes.IMPORT_SYMBOL_MAPPED),
+        "symbols_mapped": _event_number(events, Codes.IMPORT_SYMBOL_MAPPED),
+        "lists_inferred": _event_number(events, Codes.IMPORT_LIST_INFERRED),
+        "top_headers": sum(1 for b in back.content if isinstance(b, pf.Header)),
+        "headers": len(_all(back, pf.Header)),
+        "top_tables": sum(1 for b in back.content if isinstance(b, pf.Table)),
+        "tables": len(_all(back, pf.Table)),
+        "tables_11x3": sum(1 for t in _all(back, pf.Table) if _dims(t) == (11, 3)),
+        "rowspan": sum(c.rowspan > 1 for c in cells),
+        "colspan": sum(c.colspan > 1 for c in cells),
+        "rowspan_sum": sum(c.rowspan for c in cells if c.rowspan > 1),
+        "colspan_sum": sum(c.colspan for c in cells if c.colspan > 1),
+        "images": len(images),
+        "alt_not_default": sum(1 for i in images if pf.stringify(i) != "그림"),
+        "definition_lists": len(_all(back, pf.DefinitionList)),
+        "native_list_items": len(_all(read.doc, pf.ListItem)),
+        "list_items": len(_all(back, pf.ListItem)),
+        "cell_bullet_items": len(bullets),
+        "source_square": _starting(read.source_text, "▪"),
+        "source_dash": _starting(read.source_text, "-"),
+        "left_square": _starting(loose, "▪"),
+        "left_dash": _starting(loose, "-"),
+        **_source_tables(data),
+    }
+    counts["docx_ok"], counts["docx_errors"] = _reexport(md, out.assets, Format.DOCX)
+    counts["hwpx_ok"], counts["hwpx_errors"] = _reexport(md, out.assets, Format.HWPX)
+    return counts
+
+
+def _hwpx_counts(pattern: str) -> dict[str, int]:
+    data = _find(pattern).read_bytes()
+    try:
+        with _quiet():
+            return _hwpx_measure(data)
+    except Exception as exc:  # noqa: BLE001 - keep document text out of the failure message
+        raise AssertionError(f"corpus import raised {type(exc).__name__}") from None
+
+
+_EVERY_HWPX = {
+    "coverage_permille": 1000,
+    "errors": 0,
+    "text_missing": 0,
+    "definition_lists": 0,
+    "docx_ok": 1,
+    "docx_errors": 0,
+    "hwpx_ok": 1,
+    "hwpx_errors": 0,
+}
+
+
+def _same_tables_as_source(counts: dict[str, int]) -> dict[str, int]:
+    """Tables and merged cells as the package has them (R5: the grid squeeze changes none in the corpus)."""
+    return {
+        "unwrapped": 0,
+        "tables": counts["src_tables"],
+        "rowspan": counts["src_rowspan"],
+        "colspan": counts["src_colspan"],
+        "rowspan_sum": counts["src_rowspan_sum"],
+        "colspan_sum": counts["src_colspan_sum"],
+    }
+
+
+def _check(counts: dict[str, int], expected: dict[str, int]) -> None:
+    assert {k: counts[k] for k in expected} == expected
+
+
+def test_hwpx_product_description_numbers():
+    """02: the 27×2 form table unwraps into 14 label headings, its 10 content tables and 2 pictures."""
+    counts = _hwpx_counts("02_*.hwpx")
+    _check(counts, {
+        **_EVERY_HWPX,
+        "unwrapped": 1,
+        "top_headers": 14,
+        "headers": 14,
+        "top_tables": 11,  # the first 2×2 table + 10 tables from content rows
+        "images": 2,
+        "alt_not_default": 0,
+    })
+
+
+def test_hwpx_evaluation_items_numbers():
+    """평가항목: the 11×3 table stays; 10 symbol-font bullets become ▪, 7 of them list items.
+
+    The 16 bullet items in cells are those 7 plus 9 hand-typed ``-`` paragraphs (spec §9 measured).
+    """
+    counts = _hwpx_counts("*평가항목*.hwpx")
+    _check(counts, {
+        **_EVERY_HWPX,
+        **_same_tables_as_source(counts),
+        "src_tables": 1,
+        "tables_11x3": 1,
+        "symbol_events": 1,
+        "symbols_mapped": 10,
+        "source_square": 10,
+        "left_square": 3,
+        "source_dash": 9,
+        "left_dash": 0,
+        "lists_inferred": 16,
+        "cell_bullet_items": 16,
+    })
+
+
+def test_hwpx_self_check_numbers():
+    counts = _hwpx_counts("06-01*.hwpx")
+    _check(counts, {**_EVERY_HWPX, **_same_tables_as_source(counts), "src_tables": 4})
+
+
+def test_hwpx_review_opinion_numbers():
+    counts = _hwpx_counts("06-02*.hwpx")
+    _check(counts, {**_EVERY_HWPX, **_same_tables_as_source(counts), "src_tables": 2})
+
+
+def test_hwpx_product_spec_numbers():
+    """06-03: 33 native numbered paragraphs (+15 hand-typed ones) are list items; 13 pictures."""
+    counts = _hwpx_counts("06-03*.hwpx")
+    _check(counts, {
+        **_EVERY_HWPX,
+        **_same_tables_as_source(counts),
+        "src_tables": 15,
+        "native_list_items": 33,
+        "lists_inferred": 15,
+        "list_items": 48,
+        "headers": 50,
+        "images": 13,
+        "alt_not_default": 0,
+    })
