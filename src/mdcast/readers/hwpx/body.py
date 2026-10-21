@@ -58,6 +58,20 @@ def _in_body(p: etree._Element) -> bool:
     return not any(a.tag in _NOT_BODY for a in p.iterancestors())
 
 
+def _t_text(t: etree._Element) -> str:
+    """An ``hp:t``'s text as typed: a tab or space mark is a space, a line break a newline (as in §4.2)."""
+    parts = [t.text or ""]
+    for child in t:
+        if child.tag in _SPACE_MARKS:
+            parts.append(" ")
+        elif child.tag == _LINE_BREAK:
+            parts.append("\n")
+        else:
+            parts.append("".join(child.itertext()))
+        parts.append(child.tail or "")
+    return "".join(parts)
+
+
 def _own_texts(p: etree._Element) -> list[str]:
     """The paragraph's own ``hp:t`` text, leaving out paragraphs nested in its tables or notes.
 
@@ -68,7 +82,7 @@ def _own_texts(p: etree._Element) -> list[str]:
     pieces: list[list[str]] = [[]]
     for e in own(p, _T, _TBL, _EQUATION, _FIELD_BEGIN, *objects.OBJECTS, objects.DRAW_TEXT):
         if e.tag == _T:
-            pieces[-1].append("".join(e.itertext()))
+            pieces[-1].append(_t_text(e))
         elif e.tag != _FIELD_BEGIN or e.get("type") == "CLICK_HERE":
             pieces.append([])
     return ["".join(piece) for piece in pieces]
@@ -446,11 +460,11 @@ class BodyReader:
     ) -> list[pf.Block]:
         """Sibling paragraphs (a section's, a cell's or a note's) → their blocks, in order, lists grouped."""
         return group_lists(
-            ((self._style(p), self.paragraph(p, in_cell=in_cell, nested=nested)) for p in ps),
+            ((self.para_style(p), self.paragraph(p, in_cell=in_cell, nested=nested)) for p in ps),
             self.pkg.styles.numbering_start,
         )
 
-    def _style(self, p: etree._Element) -> ParaStyle:
+    def para_style(self, p: etree._Element) -> ParaStyle:
         return self.pkg.styles.paras.get(p.get("paraPrIDRef") or "", _BODY)
 
     def paragraph(
@@ -461,7 +475,7 @@ class BodyReader:
         ``in_cell`` paragraphs are Plain, ``nested`` ones (in a note) Para. Only a top-level
         paragraph becomes a heading or leaves a page-break mark: neither belongs in a note.
         """
-        style = self._style(p)
+        style = self.para_style(p)
         top = not (in_cell or nested)
         blocks: list[pf.Block] = []
         if top and p.get("pageBreak") == "1":

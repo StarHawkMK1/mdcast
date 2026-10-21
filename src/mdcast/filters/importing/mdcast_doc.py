@@ -57,15 +57,24 @@ def _has_caption(caption: pf.Caption | None) -> bool:
     return caption is not None and pf.stringify(caption).strip() != ""
 
 
+def _unwrap_strong(block: pf.Element) -> None:
+    """A block whose whole text is one Strong loses it: bold the export put on the element (hwpx run formatting)."""
+    if len(block.content) == 1 and isinstance(block.content[0], pf.Strong):
+        block.content = list(block.content[0].content)
+
+
 def _generic(text: str) -> str:
     return re.escape(text.replace("{n}", "\0")).replace("\0", r"\d+")
 
 
-def _undo_caption(caption: pf.Caption, fmt: str, n: int, ctx: ImportContext) -> None:
+def _undo_caption(caption: pf.Caption, fmt: str, n: int, ctx: ImportContext, *, bold: bool) -> None:
     before, _, after = fmt.partition("{text}")
     blocks = [b for b in caption.content if isinstance(b, (pf.Plain, pf.Para))]
     if not blocks:
         return
+    if bold:  # hwpx writes the caption's bold on its runs; docx keeps it in the caption style
+        for block in blocks:
+            _unwrap_strong(block)
     head, last = blocks[0], blocks[-1]
     head_inlines = list(head.content)
     if before:
@@ -94,8 +103,8 @@ def _unwrap_header_strong(table: pf.Table) -> None:
     for row in table.head.content:
         for cell in row.content:
             for block in cell.content:
-                if isinstance(block, (pf.Plain, pf.Para)) and len(block.content) == 1 and isinstance(block.content[0], pf.Strong):
-                    block.content = list(block.content[0].content)
+                if isinstance(block, (pf.Plain, pf.Para)):
+                    _unwrap_strong(block)
 
 
 def _reverse_inline_state(doc: pf.Doc, config: dict[str, Any], ctx: ImportContext) -> None:
@@ -103,12 +112,14 @@ def _reverse_inline_state(doc: pf.Doc, config: dict[str, Any], ctx: ImportContex
     table_fmt = config["tables"]["caption"]["format"]
     figure_fmt = config["figures"]["caption"]["format"]
     header_bold = bool(config["tables"]["header"].get("bold"))
+    caption_bold = bool((config["elements"].get("caption") or {}).get("bold"))
     counters = [0] * 6
     seen = {"table": 0, "figure": 0}
 
     def action(elem: pf.Element, _doc: pf.Doc) -> None:
         if isinstance(elem, pf.Header) and patterns and elem.level <= len(patterns):
             level = elem.level
+            _unwrap_strong(elem)  # hwpx: the heading's bold is on its runs (the headings filter drops it too)
             saved = list(counters)
             counters[level - 1] += 1
             for deeper in range(level, 6):
@@ -125,12 +136,56 @@ def _reverse_inline_state(doc: pf.Doc, config: dict[str, Any], ctx: ImportContex
                 _unwrap_header_strong(elem)
             if _has_caption(elem.caption):
                 seen["table"] += 1
-                _undo_caption(elem.caption, table_fmt, seen["table"], ctx)
+                _undo_caption(elem.caption, table_fmt, seen["table"], ctx, bold=caption_bold)
         elif isinstance(elem, pf.Figure) and _has_caption(elem.caption):
             seen["figure"] += 1
-            _undo_caption(elem.caption, figure_fmt, seen["figure"], ctx)
+            _undo_caption(elem.caption, figure_fmt, seen["figure"], ctx, bold=caption_bold)
 
     doc.walk(action)
+
+
+def _lone_image(block: pf.Element) -> pf.Image | None:
+    if isinstance(block, (pf.Para, pf.Plain)) and len(block.content) == 1 and isinstance(block.content[0], pf.Image):
+        return block.content[0]
+    return None
+
+
+def _attach_figure_captions(doc: pf.Doc, config: dict[str, Any]) -> None:
+    """A picture's paragraph and the caption paragraph beside it → one Figure (hwpx).
+
+    The hwpx writer sets a figure caption as a paragraph of its own (or as the picture's
+    ``hp:caption``, which the reader also puts after the picture), on the side
+    ``figures.caption.position`` says. Only a top-level paragraph that starts with the caption
+    format's prefix counts; ``_reverse_inline_state`` then takes the numbered prefix off.
+    """
+    caption = config["figures"]["caption"]
+    before = caption["format"].partition("{text}")[0]
+    if not before:
+        return
+    lead = re.compile("^" + _generic(before))
+    above = (caption.get("position") or "below") == "above"
+
+    def caption_of(block: pf.Element) -> list[pf.Inline] | None:
+        if not isinstance(block, (pf.Para, pf.Plain)) or _lone_image(block) is not None:
+            return None
+        inlines = list(block.content)
+        return inlines if lead.match(_plain(inlines)) else None
+
+    blocks = list(doc.content)
+    out: list[pf.Element] = []
+    i = 0
+    while i < len(blocks):
+        if i + 1 < len(blocks):
+            first, second = blocks[i], blocks[i + 1]
+            image = _lone_image(second if above else first)
+            inlines = caption_of(first if above else second)
+            if image is not None and inlines is not None:
+                out.append(pf.Figure(pf.Plain(image), caption=pf.Caption(pf.Plain(*inlines))))
+                i += 2
+                continue
+        out.append(blocks[i])
+        i += 1
+    doc.content = out
 
 
 def _drop_rule_breaks(doc: pf.Doc, config: dict[str, Any], ctx: ImportContext) -> None:
@@ -207,6 +262,7 @@ def apply(doc: pf.Doc, ctx: ImportContext) -> pf.Doc:
     tpl = resolve_template(name, cwd=ctx.cwd, home=ctx.home, report=ctx.report)
     if name:
         ctx.frontmatter["template"] = name
+    _attach_figure_captions(doc, tpl.config)
     _reverse_inline_state(doc, tpl.config, ctx)
     _drop_rule_breaks(doc, tpl.config, ctx)
     _restore_table_kinds(doc, ctx.table_styles)

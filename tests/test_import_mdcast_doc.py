@@ -3,11 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import panflute as pf
+import pytest
 from docx_builder import strip_mdcast_metadata
-from helpers import export, write_template
+from helpers import export, tiny_png, write_template
 
 from mdcast.filters.importing import ImportContext, run_import_filters
 from mdcast.readers.docx import read_docx
+from mdcast.readers.hwpx import read_hwpx
 from mdcast.report import Codes, Report
 from mdcast.types import Format, Source
 
@@ -143,3 +145,49 @@ def test_text_that_is_not_the_replayed_number_stays(tmp_path):
     name = template(tmp_path)
     doc, _ = import_back(tmp_path, "# Ⅹ. 직접 쓴 번호\n\n# 계획\n", name)
     assert [pf.stringify(h) for h in headers(doc)] == ["Ⅹ. 직접 쓴 번호", "계획"]
+
+
+def hwpx_back(tmp_path: Path, md: str, name: str | None):
+    report = Report("a.hwpx", Format.HWPX)
+    imp = read_hwpx(Source(export(tmp_path, md, Format.HWPX, name), "a.hwpx", Format.HWPX), report, "a_assets")
+    ctx = ImportContext(report, dict(imp.frontmatter), imp.generator, tmp_path, tmp_path / "home")
+    return run_import_filters(imp.doc, ctx), ctx
+
+
+def wide_png() -> bytes:
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (1200, 300), (200, 30, 30)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize("picture", [tiny_png, wide_png], ids=["caption-paragraph", "hp-caption"])
+def test_hwpx_bold_headings_and_captions_are_undone(tmp_path, picture):
+    # hwpx puts the template's bold on the runs (Strong around the whole heading or caption), and
+    # sets a figure caption as a paragraph of its own (or the picture's hp:caption) after the picture
+    name = template(tmp_path)
+    (tmp_path / "a.png").write_bytes(picture())
+    md = (
+        "# 개요\n\n## 세부\n\nTable: 예산\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n"
+        "![샘플 그림](a.png)\n\n![](a.png)\n\n다음 글\n"
+    )
+    doc, ctx = hwpx_back(tmp_path, md, name)
+    assert [pf.stringify(h) for h in headers(doc)] == ["개요", "세부"]
+    table = first(doc, pf.Table)
+    assert caption_text(table) == "예산" and not strongs(table.caption)
+    figures = blocks(doc, pf.Figure)
+    assert len(figures) == 1 and pf.stringify(figures[0].caption).strip() == "샘플 그림"
+    assert not strongs(figures[0].caption)
+    assert len(blocks(doc, pf.Image)) == 2  # the uncaptioned picture stays a paragraph of its own
+    assert pf.stringify(doc.content[-1]).strip() == "다음 글"
+    assert ctx.frontmatter["template"] == name
+
+
+def test_hwpx_figure_caption_not_in_template_format_stays_a_paragraph(tmp_path):
+    (tmp_path / "a.png").write_bytes(tiny_png())
+    doc, _ = hwpx_back(tmp_path, "![](a.png)\n\n그림 설명이 아닌 글\n", None)
+    assert not blocks(doc, pf.Figure)
+    assert pf.stringify(doc.content[-1]).strip() == "그림 설명이 아닌 글"

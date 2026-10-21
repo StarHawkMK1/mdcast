@@ -40,7 +40,7 @@ def test_open_reads_spine_order_styles_and_meta():
     pkg = open_hwpx(data)
     assert len(pkg.sections) == 2 and pkg.title == "제목" and pkg.creator == "홍"
     assert pkg.generator == {"mdcast.generator": "mdcast 0.1"}
-    assert pkg.styles.chars["1"].bold and pkg.styles.paras["3"] == ParaStyle("NUMBER", 0, "1")
+    assert pkg.styles.chars["1"].bold and pkg.styles.paras["3"] == ParaStyle("NUMBER", 0, "1", "JUSTIFY")
     assert pkg.styles.numbering_start["2"] == 3
 
 
@@ -67,13 +67,13 @@ def test_fixed_header_ids_map_to_styles():
         "5": CharStyle(strike=True),
     }
     assert styles.paras == {
-        "0": ParaStyle(),
-        "1": ParaStyle("OUTLINE", 0),
-        "2": ParaStyle("OUTLINE", 1),
-        "3": ParaStyle("NUMBER", 0, "1"),
-        "4": ParaStyle("NUMBER", 1, "1"),
-        "5": ParaStyle("BULLET", 0, "1"),
-        "6": ParaStyle("NUMBER", 0, "2"),
+        "0": ParaStyle(align="JUSTIFY"),
+        "1": ParaStyle("OUTLINE", 0, align="JUSTIFY"),
+        "2": ParaStyle("OUTLINE", 1, align="JUSTIFY"),
+        "3": ParaStyle("NUMBER", 0, "1", "JUSTIFY"),
+        "4": ParaStyle("NUMBER", 1, "1", "JUSTIFY"),
+        "5": ParaStyle("BULLET", 0, "1", "JUSTIFY"),
+        "6": ParaStyle("NUMBER", 0, "2", "JUSTIFY"),
     }
     assert styles.numbering_start == {"1": 1, "2": 3}
 
@@ -242,6 +242,17 @@ def test_source_text_has_one_entry_per_paragraph():
     # a paragraph's own text split where its table sits, then each paragraph of its tables on its
     # own line; empty ones are left out
     assert imported.source_text == ["앞 굵게", "뒤", "칸 하나", "칸 둘", "끝"]
+
+
+def test_source_text_reads_tab_and_line_break_marks_as_whitespace():
+    # a hand-typed list marker and its text are split by a tab: without the space the coverage
+    # check could not take the marker off the source (``□하나``) the way the list filter did
+    marked = (
+        '<hp:run charPrIDRef="0"><hp:t>□<hp:tab width="0" leader="0" type="1"/>하나'
+        "<hp:lineBreak/>둘</hp:t></hp:run>"
+    )
+    imported, _ = _read(p(marked))
+    assert imported.source_text == ["□ 하나\n둘"]
 
 
 def test_frontmatter_media_and_generator():
@@ -418,6 +429,34 @@ def test_cell_paragraphs_are_plain_and_caption_is_read():
     assert not blocks[1].foot.content
     # each paragraph's text once: the outer paragraph around its table, then caption and cells in XML order
     assert imported.source_text == ["앞", "뒤", "표 제목", "개요 글", "둘째", "칸 둘"]
+
+
+def _with_aligned_para_prs(data: bytes) -> bytes:
+    """``data`` with paraPr "7" RIGHT, "8" CENTER, "9" LEFT."""
+    header = zipfile.ZipFile(io.BytesIO(data)).read("Contents/header.xml").decode()
+    extra = "".join(
+        f'<hh:paraPr id="{pid}" tabPrIDRef="0" condense="0"><hh:align horizontal="{align}" vertical="BASELINE"/>'
+        '<hh:heading type="NONE" idRef="0" level="0"/></hh:paraPr>'
+        for pid, align in (("7", "RIGHT"), ("8", "CENTER"), ("9", "LEFT"))
+    )
+    header = header.replace("</hh:paraProperties>", extra + "</hh:paraProperties>")
+    return _replace(data, "Contents/header.xml", header.encode())
+
+
+def test_column_alignment_comes_from_body_cells():
+    def row(r: int, *paras: tuple[str, str]) -> list[str]:
+        return [cell(p(run(t), para=para) if t else p(para=para), col=c, row=r) for c, (t, para) in enumerate(paras)]
+
+    head = row(0, ("가", "8"), ("나", "8"), ("다", "8"), ("라", "8"), ("마", "8"))
+    rows = [
+        head,
+        row(1, ("a", "9"), ("1", "7"), ("x", "7"), ("p", "0"), ("q", "8")),
+        row(2, ("b", "9"), ("", "8"), ("y", "8"), ("r", "0"), ("s", "8")),
+    ]
+    data = _with_aligned_para_prs(hwpx_bytes(p(tbl(rows, cols=5))))
+    table = read_hwpx(Source(data, "a.hwpx", Format.HWPX), Report("a.hwpx", Format.HWPX), "a_assets").doc.content[0]
+    # head cells do not count, an empty cell does not either; mixed or justified columns stay default
+    assert [spec[0] for spec in table.colspec] == ["AlignLeft", "AlignRight", "AlignDefault", "AlignDefault", "AlignCenter"]
 
 
 _GOOD = tbl([[cell(p(run("가")), col=0, row=0), cell(p(run("나")), col=1, row=0)], _row(["다", "라"], 1)], cols=2)
@@ -1084,7 +1123,7 @@ def test_symbol_font_text_is_mapped_in_body_notes_and_source_text():
     notes = []
     imported.doc.walk(lambda e, _d: notes.append(e) if isinstance(e, pf.Note) else None)
     assert [text(n) for n in notes] == ["\u25c6 주"]
-    assert imported.source_text == ["\u25aa 가", "\u2022\u25cf 나\ue000", "\u25c6 주"]
+    assert imported.source_text == ["\u25aa 가", "\u2022 \u25cf 나\ue000", "\u25c6 주"]  # the tab mark is a space
     infos = events(report, "IMPORT_SYMBOL_MAPPED")
     assert [(e.level.value, e.message) for e in infos] == [
         ("info", "기호 글꼴 글자 4개를 보이는 기호로 바꿨습니다 (바꾸지 못한 글자 1개는 그대로 둡니다)")

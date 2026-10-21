@@ -41,6 +41,7 @@ class ParaStyle:
     kind: str = "NONE"  # "NONE" | "OUTLINE" | "NUMBER" | "BULLET"  (hh:paraPr/hh:heading@type)
     level: int = 0  # hh:heading@level
     list_id: str | None = None  # hh:heading@idRef (NUMBER → hh:numbering, BULLET → hh:bullet)
+    align: str = ""  # hh:align@horizontal (LEFT, RIGHT, CENTER, JUSTIFY …)
 
 
 @dataclass
@@ -130,12 +131,14 @@ def _char_style(element: etree._Element) -> CharStyle:
 
 def _para_style(element: etree._Element) -> ParaStyle:
     # paraPr children may sit inside hp:switch case/default copies
+    align_el = next(element.iter(hh("align")), None)
+    align = (align_el.get("horizontal") or "").upper() if align_el is not None else ""
     heading = next(element.iter(hh("heading")), None)
     if heading is None:
-        return ParaStyle()
+        return ParaStyle(align=align)
     kind = (heading.get("type") or "NONE").upper()
     list_id = heading.get("idRef") if kind in ("NUMBER", "BULLET") else None
-    return ParaStyle(kind, _int(heading.get("level"), 0), list_id)
+    return ParaStyle(kind, _int(heading.get("level"), 0), list_id, align)
 
 
 def _numbering_start(numbering: etree._Element) -> int:

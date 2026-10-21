@@ -18,7 +18,8 @@ if TYPE_CHECKING:
 _TR, _TC = f"{{{HP}}}tr", f"{{{HP}}}tc"
 _ADDR, _SPAN = f"{{{HP}}}cellAddr", f"{{{HP}}}cellSpan"
 _SUB, _CAPTION = f"{{{HP}}}subList", f"{{{HP}}}caption"
-_COLUMN = ("AlignDefault", "ColWidthDefault")
+_P = f"{{{HP}}}p"
+_ALIGNS = {"LEFT": "AlignLeft", "RIGHT": "AlignRight", "CENTER": "AlignCenter"}
 
 
 @dataclass
@@ -160,6 +161,22 @@ def _head_rows(rows: list[list[_Slot]]) -> int:
     return 0 if grown > count and grown >= len(rows) else grown
 
 
+def _column_aligns(rows: list[list[_Slot]], head: int, width: int, reader: BodyReader) -> list[str]:
+    """Each column's alignment: the one all its body cells' text paragraphs share (M3a D14).
+
+    Head cells (centred by mdcast and by most hwpx) and cells spanning columns do not count; a
+    column with no text, mixed alignments or justified text keeps the default.
+    """
+    seen: list[set[str]] = [set() for _ in range(width)]
+    for row in rows[head:]:
+        for slot in row:
+            sub = slot.tc.find(_SUB) if slot.tc is not None and slot.colspan == 1 else None
+            for p in sub.iterchildren(_P) if sub is not None else ():
+                if "".join(p.itertext()).strip():
+                    seen[slot.col].add(reader.para_style(p).align)
+    return [_ALIGNS.get(next(iter(found)), "AlignDefault") if len(found) == 1 else "AlignDefault" for found in seen]
+
+
 def read_table(tbl: etree._Element, reader: BodyReader) -> pf.Table:
     """One ``hp:tbl``; cells whose addresses do not add up are placed in document order instead."""
     by_row = [list(tr.iterchildren(_TC)) for tr in tbl.iterchildren(_TR)]
@@ -181,9 +198,10 @@ def read_table(tbl: etree._Element, reader: BodyReader) -> pf.Table:
     built = [table_row(row) for row in rows]
     head = _head_rows(rows)
     caption = tbl.find(_CAPTION)
+    width = max((s.col + s.colspan for s in slots), default=0)
     return pf.Table(
         pf.TableBody(*built[head:]),
         head=pf.TableHead(*built[:head]),
         caption=pf.Caption(*reader.sub_list(caption.find(_SUB) if caption is not None else None)),
-        colspec=[_COLUMN] * max((s.col + s.colspan for s in slots), default=0),
+        colspec=[(align, "ColWidthDefault") for align in _column_aligns(rows, head, width, reader)],
     )
