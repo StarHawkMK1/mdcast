@@ -46,6 +46,10 @@ def collect_note_definitions(text: str) -> dict[str, str]:
     current: list[str] | None = None
     fence: str | None = None
     for line in text.splitlines():
+        if current is not None and fence is None and line.startswith(("    ", "\t")):
+            # indented under a note: its own text, a fenced code block in it included
+            current.append(line[4:] if line.startswith("    ") else line[1:])
+            continue
         marker = _FENCE.match(line)
         if marker and fence in (None, marker.group(1)):
             fence = None if fence else marker.group(1)
@@ -57,15 +61,15 @@ def collect_note_definitions(text: str) -> dict[str, str]:
         if definition:
             current = notes.setdefault(definition.group(1), [])
             current.append(definition.group(2))
-        elif current is not None and line.startswith(("    ", "\t")):
-            current.append(line[4:] if line.startswith("    ") else line[1:])
         elif current is not None and not line.strip():
             current.append("")
         elif current and current[-1]:
             current.append(line)  # lazy continuation of the open paragraph
         else:
             current = None
-    return {label: "\n".join(lines).strip() for label, lines in notes.items()}
+    # blank lines go, but not the indentation of the first block (a code block when the label
+    # stands on its own line)
+    return {label: "\n".join(lines).lstrip("\n").rstrip() for label, lines in notes.items()}
 
 
 def _note_blocks(definitions: dict[str, str], labels: set[str]) -> dict[str, list[pf.Block]]:

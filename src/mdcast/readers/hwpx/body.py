@@ -363,10 +363,11 @@ class BodyReader:
         self.report = report
         self.assets = assets  # Task 6 gives this its type; None until pictures are read
         # tracked changes read as accepted: deleted text leaves the XML before anything reads it
+        # (paired across the paragraphs of a section, and of each cell, note or caption)
         for section in pkg.sections:
             if next(section.iter(hp("deleteBegin")), None) is not None:
-                for p in section.iter(_P):
-                    accept_deletions(p)
+                for paragraphs in (section, *section.iter(_SUB)):
+                    accept_deletions(list(paragraphs.iterchildren(_P)))
         # every paragraph's own text (split around its tables), nested ones (table cells, notes) as
         # their own entries, page headers, footers and memos left out; it is taken from the XML,
         # not from what this reader makes, so the coverage check sees what it drops

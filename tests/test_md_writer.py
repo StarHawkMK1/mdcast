@@ -183,6 +183,28 @@ def test_cell_notes_numbered_across_document_and_multiblock_definition():
     assert note_texts(back(md)) == ["가\n\n가-2", "나\n\n나-2"]
 
 
+def _note_shape(note: pf.Note) -> list[tuple[str, str]]:
+    return [(type(b).__name__, pf.stringify(b).strip()) for b in note.content]
+
+
+def test_cell_note_starting_with_a_code_block_or_list_keeps_its_blocks():
+    notes = [
+        pf.Note(pf.CodeBlock("a over b"), pf.Para(pf.Str("뒤"))),
+        pf.Note(pf.CodeBlock("x = 1", classes=["python"])),
+        pf.Note(pf.BulletList(pf.ListItem(txt("가")), pf.ListItem(txt("나"))), pf.Para(pf.Str("끝"))),
+    ]
+    table = make_table(
+        [[cell(txt("h1")), cell(txt("h2"))]],
+        [[cell(pf.Plain(pf.Str("x"), *notes), rowspan=2), cell(txt("y"))], [cell(txt("z"))]],
+    )
+    md = write_md(doc_with(table), {})
+    assert "\n[^t1]:\n\n        a over b\n" in md  # the label alone, the blocks indented under it
+    found: list[pf.Note] = []
+    back(md).walk(lambda e, d: found.append(e) if isinstance(e, pf.Note) else None)
+    assert [_note_shape(n) for n in found] == [_note_shape(n) for n in notes]
+    assert found[1].content[0].classes == ["python"]
+
+
 def figure(url: str, caption: str) -> pf.Figure:
     return pf.Figure(
         pf.Plain(pf.Image(pf.Str("alt"), url=url)),

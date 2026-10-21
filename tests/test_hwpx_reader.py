@@ -832,10 +832,29 @@ def test_tracked_deletion_is_left_out_of_body_and_source_text():
             t('까지<hp:deleteEnd Id="1" TcId="1" paraend="0"/>끝'),
             t('<hp:insertBegin Id="2" TcId="2" paraend="0"/> 넣은 글<hp:insertEnd Id="2" TcId="2" paraend="0"/>'),
         ),
-        p(t('가<hp:deleteBegin Id="3" TcId="3" paraend="1"/>나')),  # its end is not in this paragraph
+        p(t('가<hp:deleteBegin Id="3" TcId="3" paraend="1"/>나')),  # a begin with no end
         p(t('다<hp:deleteEnd Id="4" TcId="4" paraend="0"/>라')),  # an end with no begin
     )
     assert [text(b) for b in imported.doc.content] == ["남김 끝 넣은 글", "가나", "다라"]
     assert kinds(imported.doc.content[0].content) == ["Str", "Space", "Str", "Space", "Str", "Space", "Str"]
     assert imported.source_text == ["남김 끝 넣은 글", "가나", "다라"]
     assert skipped(report) == [_SKIPPED]
+
+
+def test_tracked_deletion_across_paragraphs_is_left_out():
+    begin, end = '<hp:deleteBegin Id="5" TcId="5" paraend="1"/>', '<hp:deleteEnd Id="5" TcId="5" paraend="0"/>'
+    in_cell = cell(p(t(f"칸 앞{begin}칸 지움")), p(t(f"칸 지움{end}칸 뒤")), col=0, row=0)
+    body = (
+        p(t(f"첫 글 {begin}지운 끝")),
+        p(run("통째로 지운 문단")),
+        p(t(f"이것도 지움{end} 남은 글")),
+        p(tbl([[in_cell]], cols=1)),
+    )
+    imported, _ = _read("".join(body))
+    blocks = imported.doc.content
+    # a paragraph left without text is dropped; a cell's paragraphs pair their own marks
+    assert [text(b) for b in blocks[:2]] == ["첫 글", "남은 글"]
+    assert [text(b) for b in blocks[2].head.content[0].content[0].content] == ["칸 앞", "칸 뒤"]
+    assert imported.source_text == ["첫 글 ", " 남은 글", "칸 앞", "칸 뒤"]
+    result = convert(Source(hwpx_bytes("".join(body)), "a.hwpx", Format.HWPX), [Format.MD])
+    assert result.report.coverage == 1.0

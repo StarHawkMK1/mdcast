@@ -176,6 +176,26 @@ def test_hwpx_footnote_in_table_cell_survives_md_round_trip():
     assert [pf.stringify(n).strip() for n in notes] == ["칸 각주 글"]
 
 
+def test_hwpx_equation_alone_in_a_cell_note_stays_a_code_block():
+    equation = '<hp:run charPrIDRef="0"><hp:equation id="1"><hp:script>q over r</hp:script></hp:equation></hp:run>'
+    footnote = (
+        '<hp:run charPrIDRef="0"><hp:ctrl><hp:footNote number="1" suffixChar="41" instId="1">'
+        '<hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP">'
+        f"{p(equation)}{p(run('설명'))}</hp:subList></hp:footNote></hp:ctrl></hp:run>"
+    )
+    rows = [[cell(p(run("머리")), col=0, row=0)], [cell(p(run("칸"), footnote), col=0, row=1)]]
+    data = hwpx_bytes(p(tbl(rows, cols=1)))
+    result = convert(Source(data, "a.hwpx", Format.HWPX), [Format.MD])
+    assert result.report.coverage == 1.0
+    back = read_md(Source(result.outputs[0].data, "a.md", Format.MD), Report("a.md", Format.MD)).doc
+    notes = []
+    back.walk(lambda e, _d: notes.append(e) if isinstance(e, pf.Note) else None)
+    assert [(type(b).__name__, pf.stringify(b).strip()) for b in notes[0].content] == [
+        ("CodeBlock", "q over r"),
+        ("Para", "설명"),
+    ]
+
+
 def test_hwpx_to_docx_is_target_unsupported():
     res = convert(Source(hwpx_bytes(p(run("a"))), "a.hwpx", Format.HWPX), [Format.DOCX, Format.MD])
     errors = [e for e in res.report.events if e.code == Codes.TARGET_UNSUPPORTED]

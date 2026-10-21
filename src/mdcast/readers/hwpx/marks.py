@@ -21,18 +21,19 @@ def own(p: etree._Element, *tags: str) -> list[etree._Element]:
     return [e for e in p.iter(*tags) if e is not p and next(e.iterancestors(_P), None) is p]
 
 
-def accept_deletions(p: etree._Element) -> None:
-    """Remove the text of ``p`` that a tracked deletion marks, as if the change were accepted.
+def accept_deletions(ps: list[etree._Element]) -> None:
+    """Remove the text of sibling paragraphs that a tracked deletion marks, as if it were accepted.
 
-    A deletion is the text between a ``deleteBegin`` and the ``deleteEnd`` with the same ``Id``
-    later in the same paragraph. A begin without such an end (one that runs on into the next
-    paragraph, or a broken one) and an end without a begin delete nothing, so no text outside
-    a marked span is lost. Marks inside the span (tabs, line breaks) go with it; tables and other
-    objects stay.
+    ``ps`` is one paragraph list (a section's paragraphs, or one ``hp:subList``'s). A deletion is
+    the text between a ``deleteBegin`` and the next ``deleteEnd`` with the same ``Id`` later in the
+    list, across paragraphs; a paragraph left without text is then dropped like any empty one. A
+    begin without such an end and an end without a begin delete nothing, so no text outside a
+    marked span is lost. Marks inside the span (tabs, line breaks) go with it; tables, notes and
+    the paragraphs in them stay.
     """
     matched: set[etree._Element] = set()  # begins with an end of the same Id after them
     later_ends: set[str | None] = set()
-    for mark in reversed(own(p, _DELETE_BEGIN, _DELETE_END)):
+    for mark in reversed([m for p in ps for m in own(p, _DELETE_BEGIN, _DELETE_END)]):
         if mark.tag == _DELETE_END:
             later_ends.add(mark.get("Id"))
         elif mark.get("Id") in later_ends:
@@ -41,7 +42,7 @@ def accept_deletions(p: etree._Element) -> None:
         return
     deleting, closing = False, None  # closing: the Id of the open deletion's end
     doomed: list[etree._Element] = []
-    for e in own(p):
+    for e in (e for p in ps for e in own(p)):
         if not deleting:
             if e in matched:
                 deleting, closing = True, e.get("Id")

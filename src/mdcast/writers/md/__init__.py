@@ -34,11 +34,18 @@ def _frontmatter(data: dict[str, Any]) -> str:
 
 
 def _note_definition(label: str, note: pf.Note) -> str:
+    """A cell note's ``[^label]:`` definition, written after the body (M3a D9).
+
+    A note that starts with text has it on the label line. One that starts with anything else (a
+    code block, a list, a table) has the label on a line of its own and every block indented under
+    it: on the label line, a code block's indentation would be lost and it would read back as text.
+    """
     blocks = [_convert(pf.Doc(deepcopy_block)).strip("\n") for deepcopy_block in note.content]
-    lines: list[str] = []
+    first_text = not note.content or isinstance(note.content[0], (pf.Para, pf.Plain))
+    lines: list[str] = [] if first_text else [f"[^{label}]:"]
     for i, text in enumerate(blocks):
         body = text.split("\n")
-        if i == 0:
+        if i == 0 and first_text:
             lines.append(f"[^{label}]: {body[0]}")
             lines += [f"    {line}" if line else "" for line in body[1:]]
         else:
