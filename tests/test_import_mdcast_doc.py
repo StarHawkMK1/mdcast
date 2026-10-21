@@ -191,3 +191,67 @@ def test_hwpx_figure_caption_not_in_template_format_stays_a_paragraph(tmp_path):
     doc, _ = hwpx_back(tmp_path, "![](a.png)\n\n그림 설명이 아닌 글\n", None)
     assert not blocks(doc, pf.Figure)
     assert pf.stringify(doc.content[-1]).strip() == "그림 설명이 아닌 글"
+
+
+MARKED = (
+    "# 제목\n\n본문 `인라인 코드`와 **`굵은 코드`** 그리고 $E = mc^2$.\n\n"
+    "```python\ndef hello():\n    print(\"안녕\")\n```\n\n```\nA-->B\n```\n\n"
+    "> 인용 하나\n>\n> 인용 둘\n\n---\n\n$$\\int_0^1 x^2 dx$$\n\n| `칸 코드` |\n|---|\n| 값 |\n\n끝[^1]\n\n[^1]: 각주 `코드`\n"
+)
+
+
+def _strip_hwpx_metadata(data: bytes) -> bytes:
+    """The same hwpx without its ``mdcast.*`` metadata: someone else's document."""
+    import io
+    import re
+    import zipfile
+
+    source = zipfile.ZipFile(io.BytesIO(data))
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as target:
+        for info in source.infolist():
+            blob = source.read(info.filename)
+            if info.filename == "Contents/content.hpf":
+                blob = re.sub(rb'<opf:meta name="mdcast\.[^"]*"[^>]*>[^<]*</opf:meta>', b"", blob)
+            target.writestr(info, blob)
+    return out.getvalue()
+
+
+def _spans(doc: pf.Doc) -> list:
+    return blocks(doc, pf.Span)
+
+
+def test_hwpx_code_quote_and_rule_marks_are_recovered(tmp_path):
+    doc, _ = hwpx_back(tmp_path, MARKED, None)
+    assert not _spans(doc)  # every hint is taken out again
+    codes = [c.text for c in blocks(doc, pf.Code)]
+    assert codes == ["인라인 코드", "굵은 코드", "E = mc^2", "\\int_0^1 x^2 dx", "칸 코드", "코드"]
+    assert isinstance(first(doc, pf.Code).parent, pf.Para)
+    assert isinstance(blocks(doc, pf.Code)[1].parent, pf.Strong)  # bold code stays bold code
+    # code blocks side by side join (as docx, M3a §5.4 b); indentation and breaks kept
+    assert [b.text for b in blocks(doc, pf.CodeBlock)] == ['def hello():\n    print("안녕")\nA-->B']
+    quote = first(doc, pf.BlockQuote)
+    assert [pf.stringify(b).strip() for b in quote.content] == ["인용 하나", "인용 둘"]
+    assert len(blocks(doc, pf.HorizontalRule)) == 1
+    # math is code text, never Math (M3b §5.3); a display equation is a paragraph of code
+    assert not blocks(doc, pf.Math)
+
+
+def test_hwpx_marks_follow_the_template_code_font(tmp_path):
+    write_template(tmp_path / ".mdcast" / "templates", "mono", "name: mono\nfonts:\n  code: {family: D2Coding}\n")
+    doc, _ = hwpx_back(tmp_path, "글 `코드`\n\n```\n블록\n```\n", "mono")
+    assert [c.text for c in blocks(doc, pf.Code)] == ["코드"]
+    assert [b.text for b in blocks(doc, pf.CodeBlock)] == ["블록"]
+
+
+def test_hwpx_marks_are_not_read_without_mdcast_metadata(tmp_path):
+    data = _strip_hwpx_metadata(export(tmp_path, MARKED, Format.HWPX, None))
+    report = Report("a.hwpx", Format.HWPX)
+    imp = read_hwpx(Source(data, "a.hwpx", Format.HWPX), report, "a_assets")
+    assert imp.generator == {}
+    ctx = ImportContext(report, dict(imp.frontmatter), imp.generator, tmp_path, tmp_path / "home")
+    doc = run_import_filters(imp.doc, ctx)
+    # spec §4.2 for someone else's hwpx: fonts, colours and borders are dropped
+    for cls in (pf.Span, pf.Code, pf.CodeBlock, pf.BlockQuote, pf.HorizontalRule):
+        assert not blocks(doc, cls), cls.__name__
+    assert "인라인 코드" in pf.stringify(doc) and "A-->B" in pf.stringify(doc)

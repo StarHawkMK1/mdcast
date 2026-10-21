@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 
 import panflute as pf
 from lxml import etree
@@ -11,7 +12,7 @@ from lxml import etree
 from mdcast.readers.docx_package import PAGEBREAK_SENTINEL
 from mdcast.readers.hwpx import objects
 from mdcast.readers.hwpx.marks import accept_deletions, click_here_guide, hyperlink_url, own
-from mdcast.readers.hwpx.package import HP, CharStyle, HwpxPackage, ParaStyle
+from mdcast.readers.hwpx.package import HP, CharStyle, HwpxPackage, ParaLook, ParaStyle
 from mdcast.readers.hwpx.tables import read_table
 from mdcast.readers.media import SMALL_IMAGE_INCHES, Assets
 from mdcast.readers.symbols import map_symbols
@@ -125,13 +126,57 @@ def _edges(inlines: list[pf.Inline]) -> tuple[list[pf.Inline], list[pf.Inline], 
     return inlines[:start], inlines[start:end], inlines[end:]
 
 
-def _styled(inlines: list[pf.Inline], style: CharStyle) -> list[pf.Inline]:
-    """Wrap in the run's formatting; edge spaces and breaks stay outside (``**a **`` is not bold MD)."""
-    if style == _PLAIN:
+@dataclass(frozen=True)
+class Hint:
+    """How the mdcast hwpx writer set a run apart, kept for ``mdcast_doc`` (mdcast documents only).
+
+    The writer uses no named style for code, a block quote or a code block, only the template's
+    code font, quote colour and code background (R17); ``mdcast_doc`` matches them against the
+    template and takes every hint out again.
+    """
+
+    font: str
+    color: str
+    fill: str
+
+
+HINT_CLASS = "mdcast-hwpx"
+
+
+def _hint_span(core: list[pf.Inline], hint: Hint, raw: str) -> pf.Span:
+    attributes = {"font": hint.font, "color": hint.color, "fill": hint.fill, "text": raw}
+    return pf.Span(*core, classes=[HINT_CLASS], attributes=attributes)
+
+
+def _raw(pieces: list[str | pf.Inline]) -> str | None:
+    """A run group's text as typed (a space mark a space, a break a newline); None if it holds anything else."""
+    out = []
+    for piece in pieces:
+        if isinstance(piece, str):
+            out.append(piece)
+        elif isinstance(piece, pf.Space):
+            out.append(" ")
+        elif isinstance(piece, pf.LineBreak):
+            out.append("\n")
+        else:
+            return None
+    return "".join(out)
+
+
+def _styled(
+    inlines: list[pf.Inline], style: CharStyle, hint: Hint | None = None, raw: str = ""
+) -> list[pf.Inline]:
+    """Wrap in the run's formatting; edge spaces and breaks stay outside (``**a **`` is not bold MD).
+
+    A hint goes innermost, so code that was bold reads back as bold code.
+    """
+    if style == _PLAIN and hint is None:
         return inlines
     lead, core, trail = _edges(inlines)
     if not core:
         return inlines
+    if hint is not None:
+        core = [_hint_span(core, hint, raw)]
     if style.superscript:
         core = [pf.Superscript(*core)]
     elif style.subscript:
@@ -281,34 +326,35 @@ class _Line:
     """The inlines of a paragraph since the last block object, grouped by character style."""
 
     def __init__(self) -> None:
-        self._groups: list[tuple[CharStyle, list[str | pf.Inline]]] = []
+        self._groups: list[tuple[CharStyle, Hint | None, list[str | pf.Inline]]] = []
         self.chars = 0  # characters of text added, spaces not counted
 
-    def add(self, style: CharStyle, piece: str | pf.Inline) -> None:
+    def add(self, style: CharStyle, piece: str | pf.Inline, hint: Hint | None = None) -> None:
         if isinstance(piece, str):
             self.chars += len(piece.strip())
-        if self._groups and self._groups[-1][0] == style:
-            self._groups[-1][1].append(piece)
+        if self._groups and self._groups[-1][:2] == (style, hint):
+            self._groups[-1][2].append(piece)
         else:
-            self._groups.append((style, [piece]))
+            self._groups.append((style, hint, [piece]))
 
-    def text(self, t: etree._Element, style: CharStyle) -> None:
+    def text(self, t: etree._Element, style: CharStyle, hint: Hint | None = None) -> None:
         """An ``hp:t``: its text, with tab/space and line-break marks between the pieces."""
         if t.text:
-            self.add(style, t.text)
+            self.add(style, t.text, hint)
         for child in t:
             if child.tag in _SPACE_MARKS:
-                self.add(style, pf.Space())
+                self.add(style, pf.Space(), hint)
             elif child.tag == _LINE_BREAK:
-                self.add(style, pf.LineBreak())
+                self.add(style, pf.LineBreak(), hint)
             if child.tail:  # also after marks this reader does not know
-                self.add(style, child.tail)
+                self.add(style, child.tail, hint)
 
     def inlines(self) -> list[pf.Inline]:
         """The inlines so far, formatting applied, spaces at the ends kept."""
         out: list[pf.Inline] = []
-        for style, pieces in self._groups:
-            out.extend(_styled(_tokens(pieces), style))
+        for style, hint, pieces in self._groups:
+            raw = _raw(pieces) if hint is not None else None
+            out.extend(_styled(_tokens(pieces), style, hint if raw is not None else None, raw or ""))
         return out
 
     def take(self) -> list[pf.Inline]:
@@ -382,6 +428,9 @@ class BodyReader:
     def __init__(self, pkg: HwpxPackage, report: Report, assets: Assets | None) -> None:
         self.pkg = pkg
         self.report = report
+        # an mdcast document: keep the writer's code, quote and rule marks for mdcast_doc (R17);
+        # any other hwpx reads as spec §4.2 says (fonts, colours and borders dropped)
+        self.hints = bool(pkg.generator)
         self.assets = assets  # None: pictures link to their BinData file name, nothing is written
         self._small: dict[int, pf.Image] = {}  # pictures that may have been text (IMPORT_IMAGE_TEXT)
         # tracked changes read as accepted: deleted text leaves the XML before anything reads it
@@ -494,11 +543,18 @@ class BodyReader:
             elif inlines:
                 blocks.append(self._block(inlines, style, in_cell, top))
 
+        look = self.pkg.styles.para_looks.get(p.get("paraPrIDRef") or "", ParaLook())
         for run in runs:
-            char = self.pkg.styles.chars.get(run.get("charPrIDRef") or "", _PLAIN)
+            char_id = run.get("charPrIDRef") or ""
+            char = self.pkg.styles.chars.get(char_id, _PLAIN)
+            hint = None
+            if self.hints:
+                char_look = self.pkg.styles.char_looks.get(char_id)
+                if char_look is not None:
+                    hint = Hint(char_look.font, char_look.color, look.fill)
             for child in run:
                 if child.tag == _T:
-                    fields.line.text(child, char)
+                    fields.line.text(child, char, hint)
                 elif child.tag == _EQUATION:
                     code = self._equation(child)
                     if code is not None:
@@ -524,6 +580,9 @@ class BodyReader:
                 elif objects.is_object(child):
                     self._object(child, in_cell, fields, flush, blocks)
         flush()
+        if self.hints and top and look.rule and all(_is_sentinel(b) for b in blocks):
+            # the writer's horizontal rule: an empty paragraph with only a bottom border (R17)
+            blocks.append(pf.HorizontalRule())
         return blocks
 
     def is_small(self, image: pf.Image) -> bool:

@@ -11,6 +11,7 @@ from mdcast.counters import format_counter
 from mdcast.filters import pagebreak as export_pagebreak
 from mdcast.filters._raw import raw_block
 from mdcast.filters.importing.context import ImportContext
+from mdcast.readers.hwpx.body import HINT_CLASS
 from mdcast.templates import resolve_template
 
 
@@ -188,6 +189,88 @@ def _attach_figure_captions(doc: pf.Doc, config: dict[str, Any]) -> None:
     doc.content = out
 
 
+def _is_hint(elem: pf.Element) -> bool:
+    return isinstance(elem, pf.Span) and HINT_CLASS in elem.classes
+
+
+def _hints(block: pf.Element) -> list[pf.Span]:
+    found: list[pf.Span] = []
+    block.walk(lambda e, _d: found.append(e) if _is_hint(e) else None)
+    return found
+
+
+def _colour(value: Any) -> str:
+    return str(value or "").upper()
+
+
+def _take_hints(doc: pf.Doc, config: dict[str, Any]) -> None:
+    """hwpx: the writer's code, code block and quote marks back as Code, CodeBlock, BlockQuote (R17).
+
+    The hwpx reader keeps, for mdcast documents only, each run's Latin font and colour and its
+    paragraph's background as a hint span. The writer sets inline code (and math) in the
+    template's code font, a code block also on the code background, and a quote in the quote
+    colour; matching them here against the template keeps the reader template-free. Every hint
+    span is gone afterwards: the unmatched ones are unwrapped.
+    """
+    fonts, elements = config["fonts"], config["elements"]
+    code_font = str((fonts.get("code") or {}).get("family") or "")
+    if code_font == str((fonts.get("body") or {}).get("family") or ""):
+        code_font = ""  # nothing sets code apart
+    code_fill = _colour((elements.get("code") or {}).get("background"))
+    quote = _colour((elements.get("quote") or {}).get("color"))
+    if quote == _colour((elements.get("body") or {}).get("color") or "#000000"):
+        quote = ""
+
+    def is_code(span: pf.Span) -> bool:
+        return bool(code_font) and span.attributes.get("font") == code_font
+
+    def code_block(block: pf.Element) -> pf.CodeBlock | None:
+        if not isinstance(block, pf.Para) or not block.content:
+            return None
+        spans = list(block.content)
+        if not all(_is_hint(s) and is_code(s) for s in spans):
+            return None
+        if code_fill and any(s.attributes.get("fill") != code_fill for s in spans):
+            return None  # code on the body background: a paragraph of inline code (or math)
+        return pf.CodeBlock("".join(s.attributes.get("text", "") for s in spans))
+
+    def quoted(block: pf.Element) -> bool:
+        if not quote or not isinstance(block, pf.Para):
+            return False
+        spans = _hints(block)
+        return bool(spans) and all(s.attributes.get("color") == quote for s in spans)
+
+    out: list[pf.Element] = []
+    open_quote: pf.BlockQuote | None = None  # the quote that quoted paragraphs in a row join
+    for block in doc.content:
+        if quoted(block):
+            if open_quote is None:
+                open_quote = pf.BlockQuote()
+                out.append(open_quote)
+            open_quote.content.append(block)
+            continue
+        open_quote = None
+        replaced = code_block(block)
+        if replaced is None:
+            out.append(block)
+        elif out and isinstance(out[-1], pf.CodeBlock):
+            # code blocks side by side join, as docx does (M3a §5.4 b); written apart they would
+            # come back from the MD as one block with a blank line inside
+            out[-1].text += "\n" + replaced.text
+        else:
+            out.append(replaced)
+    doc.content = out
+
+    def unwrap(elem: pf.Element, _doc: pf.Doc):
+        if not _is_hint(elem):
+            return None
+        if is_code(elem):
+            return pf.Code(elem.attributes.get("text", "").strip())
+        return list(elem.content)
+
+    doc.walk(unwrap)
+
+
 def _drop_rule_breaks(doc: pf.Doc, config: dict[str, Any], ctx: ImportContext) -> None:
     shim = SimpleNamespace(config=config, frontmatter={}, report=ctx.report)
     levels, skip_first = export_pagebreak._settings(shim)  # type: ignore[arg-type]
@@ -262,6 +345,7 @@ def apply(doc: pf.Doc, ctx: ImportContext) -> pf.Doc:
     tpl = resolve_template(name, cwd=ctx.cwd, home=ctx.home, report=ctx.report)
     if name:
         ctx.frontmatter["template"] = name
+    _take_hints(doc, tpl.config)
     _attach_figure_captions(doc, tpl.config)
     _reverse_inline_state(doc, tpl.config, ctx)
     _drop_rule_breaks(doc, tpl.config, ctx)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import zipfile
 import zlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
 from lxml import etree
@@ -13,6 +13,7 @@ from lxml import etree
 HP = "http://www.hancom.co.kr/hwpml/2011/paragraph"
 HS = "http://www.hancom.co.kr/hwpml/2011/section"
 HH = "http://www.hancom.co.kr/hwpml/2011/head"
+HC = "http://www.hancom.co.kr/hwpml/2011/core"
 # Hancom writes the OPF namespace with a trailing slash; accept the textbook form too.
 _OPFS = ("http://www.idpf.org/2007/opf/", "http://www.idpf.org/2007/opf")
 _ODF = "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0"
@@ -44,6 +45,22 @@ class ParaStyle:
     align: str = ""  # hh:align@horizontal (LEFT, RIGHT, CENTER, JUSTIFY …)
 
 
+@dataclass(frozen=True)
+class CharLook:
+    """What the mdcast hwpx writer sets a code or quote run apart by (read only for mdcast documents)."""
+
+    font: str = ""  # the Latin face (hh:fontRef@latin → hh:fontface lang="LATIN")
+    color: str = ""  # hh:charPr@textColor, upper case
+
+
+@dataclass(frozen=True)
+class ParaLook:
+    """What the mdcast hwpx writer sets a code block or horizontal rule apart by."""
+
+    fill: str = ""  # the border fill's face colour, upper case; "" for none
+    rule: bool = False  # the border fill draws a bottom line and no other
+
+
 @dataclass
 class Styles:
     chars: dict[str, CharStyle]
@@ -51,6 +68,8 @@ class Styles:
     numbering_start: dict[
         str, int
     ]  # hh:numbering@id → first-level start (hh:paraHead@start, default 1)
+    char_looks: dict[str, CharLook] = field(default_factory=dict)
+    para_looks: dict[str, ParaLook] = field(default_factory=dict)
 
 
 @dataclass
@@ -161,7 +180,40 @@ def _styles(header: etree._Element | None) -> Styles:
         for e in header.iter(hh("numbering"))
         if e.get("id") is not None
     }
-    return Styles(chars, paras, starts)
+    return Styles(chars, paras, starts, _char_looks(header), _para_looks(header))
+
+
+def _char_looks(header: etree._Element) -> dict[str, CharLook]:
+    latin = {
+        font.get("id"): font.get("face") or ""
+        for fontface in header.iter(hh("fontface"))
+        if (fontface.get("lang") or "").upper() == "LATIN"
+        for font in fontface.iter(hh("font"))
+    }
+    looks = {}
+    for e in header.iter(hh("charPr")):
+        ref = e.find(hh("fontRef"))
+        face = latin.get(ref.get("latin")) or "" if ref is not None else ""
+        looks[e.get("id")] = CharLook(face, (e.get("textColor") or "").upper())
+    return looks
+
+
+def _para_looks(header: etree._Element) -> dict[str, ParaLook]:
+    fills = {}
+    for e in header.iter(hh("borderFill")):
+        brush = next(e.iter(f"{{{HC}}}winBrush"), None)
+        face = (brush.get("faceColor") or "").upper() if brush is not None else ""
+        sides = {
+            side: (e.find(hh(side)).get("type") if e.find(hh(side)) is not None else "NONE") or "NONE"
+            for side in ("leftBorder", "rightBorder", "topBorder", "bottomBorder")
+        }
+        rule = sides.pop("bottomBorder").upper() != "NONE" and all(t.upper() == "NONE" for t in sides.values())
+        fills[e.get("id")] = ParaLook("" if face == "NONE" else face, rule)
+    looks = {}
+    for e in header.iter(hh("paraPr")):
+        border = next(e.iter(hh("border")), None)
+        looks[e.get("id")] = fills.get(border.get("borderFillIDRef") if border is not None else None, ParaLook())
+    return looks
 
 
 def open_hwpx(data: bytes) -> HwpxPackage:
