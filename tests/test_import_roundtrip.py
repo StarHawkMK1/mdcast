@@ -14,7 +14,7 @@ from helpers import export, write_template
 
 from mdcast.pipeline import convert
 from mdcast.readers.md import read_md
-from mdcast.report import Report
+from mdcast.report import Codes, Report
 from mdcast.templates import resolve_template
 from mdcast.types import Format, Options, Source
 
@@ -142,3 +142,4 @@ def test_docx_roundtrip_keeps_body(tmp_path, name, template):
     assert _front(back.frontmatter) == _front(original.frontmatter)
     assert back.frontmatter.get("template") == (template or "default")
     assert result.report.coverage == 1.0
+    assert not [e for e in result.report.events if e.code == Codes.IMPORT_TABLE_UNWRAPPED]  # no form tables here

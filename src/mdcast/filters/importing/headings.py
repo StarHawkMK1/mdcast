@@ -145,6 +145,4 @@ def apply(doc: pf.Doc, ctx: ImportContext) -> pf.Doc:
     doc.content = blocks
     if promoted:
         ctx.report.info(Codes.IMPORT_HEADING_INFERRED, f"제목 {promoted}개를 번호 모양으로 추정했습니다")
-    if not any(isinstance(b, pf.Header) for b in blocks):
-        ctx.report.warn(Codes.IMPORT_HEADING_INFERRED, "제목을 찾지 못했습니다. 제목 단계 없이 가져옵니다", once=True)
     return doc
