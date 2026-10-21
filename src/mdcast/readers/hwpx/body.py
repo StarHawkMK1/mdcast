@@ -123,6 +123,95 @@ def _cell_paragraphs(blocks: list[pf.Block]) -> list[pf.Block]:
     return [pf.Para(*b.content) if isinstance(b, pf.Plain) else b for b in blocks]
 
 
+_LIST_KINDS = ("NUMBER", "BULLET")
+_LISTS = (pf.OrderedList, pf.BulletList)
+
+
+class _Frame:
+    """An open list while its paragraphs are grouped: its level and each item's blocks."""
+
+    def __init__(self, level: int, start: int) -> None:
+        self.level = level
+        self.start = start
+        self.items: list[list[pf.Block]] = []
+
+    def to_list(self, kind: str) -> pf.Block:
+        # pandoc writes a list tight (no blank lines) when no item has a second block besides its
+        # nested lists, and tight items read back as Plain; an item holding more (a table, a
+        # page-break mark) makes it write the whole list loose, which reads back as Para
+        loose = any(sum(not isinstance(b, _LISTS) for b in item) > 1 for item in self.items)
+        text = pf.Para if loose else pf.Plain
+        items = [
+            pf.ListItem(
+                *(text(*b.content) if isinstance(b, (pf.Para, pf.Plain)) else b for b in item)
+            )
+            for item in self.items
+        ]
+        if kind == "NUMBER":
+            return pf.OrderedList(*items, start=self.start)
+        return pf.BulletList(*items)
+
+
+def _nest(kind: str, start: int, paras: list[tuple[int, list[pf.Block]]]) -> pf.Block:
+    """One list from its paragraphs' (level, blocks): a deeper paragraph opens a list in the item before it.
+
+    A level that skips one (0 → 2) nests one step only, and a later paragraph between the two
+    levels joins that nested list; a paragraph shallower than the first one stays in the outer
+    list. No paragraph moves or is dropped.
+    """
+    first = paras[0][0]
+    stack = [_Frame(first, start if first == 0 else 1)]
+
+    def close() -> None:
+        done = stack.pop()
+        stack[-1].items[-1].append(done.to_list(kind))
+
+    for level, blocks in paras:
+        while len(stack) > 1 and stack[-1].level > level:
+            if stack[-2].level < level:
+                stack[-1].level = level
+                break
+            close()
+        if level > stack[-1].level:
+            stack.append(_Frame(level, 1))
+        elif level < stack[-1].level:  # only the outer list, shallower than where it began
+            stack[-1].level = level
+        stack[-1].items.append(blocks)
+    while len(stack) > 1:
+        close()
+    return stack[0].to_list(kind)
+
+
+def group_lists(
+    paras: Iterable[tuple[ParaStyle, list[pf.Block]]], starts: dict[str, int]
+) -> list[pf.Block]:
+    """The blocks of sibling paragraphs, Hancom numbered and bulleted paragraphs grouped into lists.
+
+    Paragraphs of one kind and ``list_id`` that follow each other are one list (spec §4.4); a
+    paragraph without blocks is passed over, so an empty line does not split a list Hancom numbers
+    on across. All of a paragraph's blocks go into its item. A numbered list starts at its
+    numbering's first number (``starts``); the number shape is dropped.
+    """
+    out: list[pf.Block] = []
+    run: list[tuple[int, list[pf.Block]]] = []
+    key: tuple[str, str | None] | None = None
+    for style, blocks in paras:
+        if not blocks:
+            continue
+        this = (style.kind, style.list_id) if style.kind in _LIST_KINDS else None
+        if run and this != key:
+            out.append(_nest(key[0], starts.get(key[1] or "", 1), run))
+            run = []
+        key = this
+        if this is None:
+            out.extend(blocks)
+        else:
+            run.append((style.level, blocks))
+    if run:
+        out.append(_nest(key[0], starts.get(key[1] or "", 1), run))
+    return out
+
+
 class _Line:
     """The inlines of a paragraph since the last block object, grouped by character style."""
 
@@ -185,15 +274,18 @@ class BodyReader:
         return _cell_paragraphs(self.paragraphs(sub.iterchildren(_P), in_cell=True))
 
     def paragraphs(self, ps: Iterable[etree._Element], *, in_cell: bool) -> list[pf.Block]:
-        """A run of sibling paragraphs (a section's or a cell's) → their blocks, in order."""
-        out: list[pf.Block] = []
-        for p in ps:
-            out.extend(self.paragraph(p, in_cell=in_cell))
-        return out
+        """A run of sibling paragraphs (a section's or a cell's) → their blocks, in order, lists grouped."""
+        return group_lists(
+            ((self._style(p), self.paragraph(p, in_cell=in_cell)) for p in ps),
+            self.pkg.styles.numbering_start,
+        )
+
+    def _style(self, p: etree._Element) -> ParaStyle:
+        return self.pkg.styles.paras.get(p.get("paraPrIDRef") or "", _BODY)
 
     def paragraph(self, p: etree._Element, *, in_cell: bool) -> list[pf.Block]:
         """One ``hp:p`` → its blocks: a page-break sentinel, then text split around block objects."""
-        style = self.pkg.styles.paras.get(p.get("paraPrIDRef") or "", _BODY)
+        style = self._style(p)
         blocks: list[pf.Block] = []
         if not in_cell and p.get("pageBreak") == "1":
             blocks.append(pf.Para(pf.Str(PAGEBREAK_SENTINEL)))

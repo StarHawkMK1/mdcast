@@ -14,6 +14,7 @@ from mdcast.readers.docx_package import PAGEBREAK_SENTINEL
 from mdcast.readers.hwpx import read_hwpx
 from mdcast.readers.hwpx.body import BodyReader
 from mdcast.readers.hwpx.package import HP, CharStyle, HwpxError, ParaStyle, open_hwpx
+from mdcast.readers.md import read_md
 from mdcast.report import Report
 from mdcast.types import Format, Source
 
@@ -189,19 +190,20 @@ def test_page_break_on_an_empty_paragraph_still_leaves_sentinel():
     assert [text(b) for b in doc.content] == ["앞", PAGEBREAK_SENTINEL, "뒤"]
 
 
-def _outline_header_with_level(level: str) -> str:
-    return (
-        '<hh:paraPr id="7" tabPrIDRef="0" condense="0"><hh:align horizontal="JUSTIFY" vertical="BASELINE"/>'
-        f'<hh:heading type="OUTLINE" idRef="0" level="{level}"/></hh:paraPr>'
+def _with_para_pr(data: bytes, pid: str, kind: str, ref: str, level: str) -> bytes:
+    """``data`` with one more paraPr in its header (ids from "7" on are free)."""
+    para_pr = (
+        f'<hh:paraPr id="{pid}" tabPrIDRef="0" condense="0"><hh:align horizontal="JUSTIFY" vertical="BASELINE"/>'
+        f'<hh:heading type="{kind}" idRef="{ref}" level="{level}"/></hh:paraPr>'
     )
+    header = zipfile.ZipFile(io.BytesIO(data)).read("Contents/header.xml").decode()
+    header = header.replace("</hh:paraProperties>", para_pr + "</hh:paraProperties>")
+    return _replace(data, "Contents/header.xml", header.encode())
 
 
 @pytest.mark.parametrize(("level", "expected"), [("5", 6), ("7", 6), ("9", None)])
 def test_deep_outline_levels_cap_at_six_and_nine_is_body(level, expected):
-    data = hwpx_bytes(p(run("깊은"), para="7"))
-    header = zipfile.ZipFile(io.BytesIO(data)).read("Contents/header.xml").decode()
-    header = header.replace("</hh:paraProperties>", _outline_header_with_level(level) + "</hh:paraProperties>")
-    data = _replace(data, "Contents/header.xml", header.encode())
+    data = _with_para_pr(hwpx_bytes(p(run("깊은"), para="7")), "7", "OUTLINE", "0", level)
     report = Report("a.hwpx", Format.HWPX)
     block = read_hwpx(Source(data, "a.hwpx", Format.HWPX), report, "a_assets").doc.content[0]
     if expected is None:
@@ -453,3 +455,153 @@ def test_table_without_cells_leaves_only_its_caption():
     assert result.outputs[0].data.decode() == "앞\n\n뒤\n" and result.report.coverage == 1.0
     doc, _ = read(p(run("앞"), _with_caption(empty, p(run("제목"))), run("뒤")))
     assert kinds(doc.content) == ["Para", "Plain", "Para"] and [text(b) for b in doc.content] == ["앞", "제목", "뒤"]
+
+
+_LISTS = (pf.OrderedList, pf.BulletList)
+
+
+def items(lst: pf.Block) -> list[str]:
+    """Each item's text, leaving out its nested lists."""
+    return [" ".join(text(b) for b in item.content if not isinstance(b, _LISTS)) for item in lst.content]
+
+
+def test_number_paragraphs_become_ordered_list_with_nested_level():
+    doc, _ = read(p(run("가"), para="3"), p(run("나"), para="4"), p(run("다"), para="3"))
+    ol = doc.content[0]
+    assert isinstance(ol, pf.OrderedList) and len(ol.content) == 2
+    assert isinstance(ol.content[0].content[-1], pf.OrderedList)
+    assert kinds(doc.content) == ["OrderedList"] and items(ol) == ["가", "다"]
+    sub = ol.content[0].content[-1]
+    assert items(sub) == ["나"] and (ol.start, sub.start) == (1, 1)
+    assert (ol.style, ol.delimiter) == ("Decimal", "Period")
+    # one paragraph per item: a tight list, which MD reads back as Plain items
+    assert kinds(ol.content[0].content) == ["Plain", "OrderedList"] and kinds(ol.content[1].content) == ["Plain"]
+
+
+def test_list_start_number_comes_from_numbering():
+    doc, _ = read(p(run("셋"), para="6"), p(run("넷"), para="6"))
+    assert kinds(doc.content) == ["OrderedList"] and doc.content[0].start == 3
+    assert items(doc.content[0]) == ["셋", "넷"]
+
+
+def test_bullet_paragraphs_in_cell_are_bullet_list_of_plain():
+    first = cell(p(run("가"), para="5"), p(run("나"), para="5"), col=0, row=0)
+    table = only_table(tbl([[first, cell(p(run("칸")), col=1, row=0)]], cols=2))
+    content = table.head.content[0].content[0].content
+    # the cell holds one list and no paragraph: R3 leaves its items alone
+    assert kinds(content) == ["BulletList"] and items(content[0]) == ["가", "나"]
+    assert [kinds(item.content) for item in content[0].content] == [["Plain"], ["Plain"]]
+
+
+def test_bullet_list_in_body_and_cell_text_around_a_list_follows_r3():
+    doc, _ = read(p(run("가"), para="5"), p(run("나"), para="5"))
+    assert kinds(doc.content) == ["BulletList"] and items(doc.content[0]) == ["가", "나"]
+    first = cell(p(run("앞")), p(run("가"), para="5"), p(run("뒤")), col=0, row=0)
+    second = cell(p(run("나"), para="3"), p(run("끝")), col=1, row=0)
+    row = only_table(tbl([[first, second]], cols=2)).head.content[0]
+    # two paragraphs around the list are a Para each; a list and one paragraph keep the Plain
+    assert kinds(row.content[0].content) == ["Para", "BulletList", "Para"]
+    assert kinds(row.content[1].content) == ["OrderedList", "Plain"]
+    assert kinds(row.content[0].content[1].content[0].content) == ["Plain"]
+
+
+def test_list_breaks_on_kind_id_and_text_but_not_on_empty_paragraph():
+    doc, _ = read(
+        p(run("가"), para="3"),
+        p(),
+        p(run("나"), para="3"),
+        p(run("다"), para="6"),
+        p(run("라"), para="5"),
+        p(run("본문")),
+        p(run("마"), para="5"),
+    )
+    assert kinds(doc.content) == ["OrderedList", "OrderedList", "BulletList", "Para", "BulletList"]
+    assert [items(b) if isinstance(b, _LISTS) else text(b) for b in doc.content] == [
+        ["가", "나"],
+        ["다"],
+        ["라"],
+        "본문",
+        ["마"],
+    ]
+    assert [doc.content[0].start, doc.content[1].start] == [1, 3]
+
+
+def test_list_level_jumps_keep_every_paragraph_in_order():
+    def lst(*paras: str) -> pf.Block:
+        data = _with_para_pr(hwpx_bytes(*paras), "7", "NUMBER", "1", "2")
+        doc = read_hwpx(Source(data, "a.hwpx", Format.HWPX), Report("a.hwpx", Format.HWPX), "a").doc
+        assert kinds(doc.content) == ["OrderedList"]
+        return doc.content[0]
+
+    # a list that starts one level down is a list of its own; a shallower item later is its sibling
+    ol = lst(p(run("가"), para="4"), p(run("나"), para="4"), p(run("다"), para="3"))
+    assert items(ol) == ["가", "나", "다"] and ol.start == 1
+    # 0 → 2 nests one level only; the following level 1 item goes in the same nested list
+    ol = lst(p(run("가"), para="3"), p(run("나"), para="7"), p(run("다"), para="4"), p(run("라"), para="3"))
+    assert items(ol) == ["가", "라"]
+    assert kinds(ol.content[0].content) == ["Plain", "OrderedList"]
+    assert items(ol.content[0].content[1]) == ["나", "다"]
+    # 1 → 2 → 0: the deeper list closes, the outer one goes on
+    ol = lst(p(run("가"), para="4"), p(run("나"), para="7"), p(run("다"), para="3"))
+    assert items(ol) == ["가", "다"] and items(ol.content[0].content[1]) == ["나"]
+
+
+def test_list_paragraph_with_page_break_or_table_makes_loose_list():
+    table = tbl([[cell(p(run("칸")), col=0, row=0)]], cols=1)
+    doc, _ = read(p(run("가"), para="3"), p(run("나"), table, para="3"), p(run("다"), para="3"))
+    assert kinds(doc.content) == ["OrderedList"] and len(doc.content[0].content) == 3
+    # a tight list item cannot hold a table in MD: the whole list is loose, its text in Paras
+    assert [kinds(item.content) for item in doc.content[0].content] == [["Para"], ["Para", "Table"], ["Para"]]
+    doc, _ = read(p(run("가"), para="5"), p(run("나"), para="5", page_break=True))
+    assert [kinds(item.content) for item in doc.content[0].content] == [["Para"], ["Para", "Para"]]
+    assert text(doc.content[0].content[1].content[0]) == PAGEBREAK_SENTINEL
+
+
+def test_hand_typed_number_after_native_list_still_merges_via_import_filters():
+    data = hwpx_bytes(p(run("하나"), para="3"), p(run("둘"), para="3"), p(run("3. 셋")))
+    result = convert(Source(data, "a.hwpx", Format.HWPX), [Format.MD])
+    assert result.report.coverage == 1.0
+    back = read_md(Source(result.outputs[0].data, "a.md", Format.MD), Report("a.md", Format.MD)).doc
+    assert kinds(back.content) == ["OrderedList"] and items(back.content[0]) == ["하나", "둘", "셋"]
+
+
+def _shape(blocks) -> list:
+    """Block kinds, list starts and text, nested lists and table cells included."""
+    out = []
+    for b in blocks:
+        if isinstance(b, pf.OrderedList):
+            out.append(("OrderedList", b.start, [_shape(item.content) for item in b.content]))
+        elif isinstance(b, pf.BulletList):
+            out.append(("BulletList", [_shape(item.content) for item in b.content]))
+        elif isinstance(b, pf.Table):
+            rows = list(b.head.content) + [row for body in b.content for row in body.content]
+            out.append(("Table", [[_shape(c.content) for c in row.content] for row in rows]))
+        else:
+            out.append((type(b).__name__, text(b)))
+    return out
+
+
+def test_native_lists_survive_md_round_trip():
+    in_cell = cell(p(run("칸 가"), para="3"), p(run("칸 나"), para="4"), p(run("칸 글")), col=0, row=0)
+    table = tbl([[in_cell, cell(p(run("칸 다"), para="5"), col=1, row=0)]], cols=2)
+    loose = tbl([[cell(p(run("안")), col=0, row=0)]], cols=1)
+    data = hwpx_bytes(
+        p(run("하나"), para="3"),
+        p(run("하위"), para="4"),
+        p(run("둘"), para="3"),
+        p(run("본문")),
+        p(run("셋"), para="6"),
+        p(run("글머리"), para="5"),
+        p(run("본문 둘")),
+        p(run("느슨"), para="5"),
+        p(run("표 앞"), loose, para="5"),
+        p(table),
+    )
+    report = Report("a.hwpx", Format.HWPX)
+    source = read_hwpx(Source(data, "a.hwpx", Format.HWPX), report, "a_assets").doc
+    result = convert(Source(data, "a.hwpx", Format.HWPX), [Format.MD])
+    assert result.report.coverage == 1.0
+    back = read_md(Source(result.outputs[0].data, "a.md", Format.MD), Report("a.md", Format.MD)).doc
+    assert _shape(back.content) == _shape(source.content)
+    shape = [k for k, *_ in _shape(source.content)]
+    assert shape == ["OrderedList", "Para", "OrderedList", "BulletList", "Para", "BulletList", "Table"]
