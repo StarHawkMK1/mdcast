@@ -112,6 +112,17 @@ def _tidy(inlines: list[pf.Inline]) -> list[pf.Inline]:
     return out
 
 
+def _cell_paragraphs(blocks: list[pf.Block]) -> list[pf.Block]:
+    """One paragraph in a cell or caption stays Plain; several become a Para each (R3).
+
+    The MD writer puts Plains side by side with no break between them, so read_md would join
+    them into one paragraph; separate Paras come back as written.
+    """
+    if sum(isinstance(b, pf.Plain) for b in blocks) < 2:
+        return blocks
+    return [pf.Para(*b.content) if isinstance(b, pf.Plain) else b for b in blocks]
+
+
 class _Line:
     """The inlines of a paragraph since the last block object, grouped by character style."""
 
@@ -169,7 +180,9 @@ class BodyReader:
 
     def sub_list(self, sub: etree._Element | None) -> list[pf.Block]:
         """The blocks of an ``hp:subList`` (a table cell or caption); none when it is missing."""
-        return [] if sub is None else self.paragraphs(sub.iterchildren(_P), in_cell=True)
+        if sub is None:
+            return []
+        return _cell_paragraphs(self.paragraphs(sub.iterchildren(_P), in_cell=True))
 
     def paragraphs(self, ps: Iterable[etree._Element], *, in_cell: bool) -> list[pf.Block]:
         """A run of sibling paragraphs (a section's or a cell's) → their blocks, in order."""

@@ -291,7 +291,7 @@ def test_merged_cells_keep_spans_and_nested_table():
     ]
     rows = list(table.head.content) + list(table.content[0].content)
     nested_cell = rows[1].content[1]
-    assert kinds(nested_cell.content) == ["Plain", "Table", "Plain"]
+    assert kinds(nested_cell.content) == ["Para", "Table", "Para"]
     nested = nested_cell.content[1]
     assert grid(nested) == [[("안1", 0, 1, 1), ("안2", 1, 1, 1)], [("안3", 0, 1, 1), ("안4", 1, 1, 1)]]
     assert len(nested.head.content) == 1 and len(nested.content[0].content) == 1
@@ -405,9 +405,11 @@ def test_cell_paragraphs_are_plain_and_caption_is_read():
     blocks = imported.doc.content
     assert kinds(blocks) == ["Para", "Table", "Para"]
     assert [text(blocks[0]), text(blocks[2])] == ["앞", "뒤"]
+    # no heading or page-break sentinel in a cell; one paragraph is Plain, several a Para each (R3)
     content = blocks[1].head.content[0].content[0].content
-    assert kinds(content) == ["Plain", "Plain"] and [text(b) for b in content] == ["개요 글", "둘째"]
+    assert kinds(content) == ["Para", "Para"] and [text(b) for b in content] == ["개요 글", "둘째"]
     assert kinds(content[1].content) == ["Strong"]
+    assert kinds(blocks[1].head.content[0].content[1].content) == ["Plain"]
     assert kinds(blocks[1].caption.content) == ["Plain"] and text(blocks[1].caption) == "표 제목"
     assert not blocks[1].foot.content
     # each paragraph's text once: the outer paragraph around its table, then caption and cells in XML order

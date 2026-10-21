@@ -119,6 +119,40 @@ def test_hwpx_table_spans_survive_md_round_trip():
     assert len(nested) == 1 and _hwpx_grid(nested[0]) == [[("안", 0, 1, 1), ("쪽", 1, 1, 1)]]
 
 
+def _cell_blocks(table) -> list[list[list[tuple[str, str]]]]:
+    rows = list(table.head.content) + [row for body in table.content for row in body.content]
+    return [
+        [[(type(b).__name__, pf.stringify(b).strip()) for b in c.content] for c in row.content]
+        for row in rows
+    ]
+
+
+def test_hwpx_multi_paragraph_cells_and_captions_survive_md_round_trip():
+    inner = tbl([[cell(p(run("안")), col=0, row=0)]], cols=1)
+    caption = (
+        '<hp:caption side="BOTTOM" fullSz="0" width="8504" gap="850" lastWidth="8000">'
+        '<hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP">'
+        f"{p(run('제목 하나'))}{p(run('제목 둘'))}</hp:subList></hp:caption>"
+    )
+    rows = [
+        [cell(p(run("머리 가")), col=0, row=0), cell(p(run("머리 나")), col=1, row=0)],
+        [cell(p(run("첫 줄")), p(run("둘째 줄")), col=0, row=1), cell(p(run("하나")), col=1, row=1)],
+        [cell(p(run("앞"), inner, run("뒤")), col=0, row=2), cell(p(run("글"), inner), col=1, row=2)],
+    ]
+    table = tbl(rows, cols=2).replace('<hp:pos treatAsChar="1"/>', '<hp:pos treatAsChar="1"/>' + caption)
+    data = hwpx_bytes(p(table))
+    report = Report("a.hwpx", Format.HWPX)
+    source = read_hwpx(Source(data, "a.hwpx", Format.HWPX), report, "a_assets").doc.content[0]
+    result = convert(Source(data, "a.hwpx", Format.HWPX), [Format.MD])
+    assert result.report.coverage == 1.0
+    back = read_md(Source(result.outputs[0].data, "a.md", Format.MD), Report("a.md", Format.MD)).doc.content
+    assert [type(b).__name__ for b in back] == ["Table"]
+    assert _cell_blocks(source)[1][0] == [("Para", "첫 줄"), ("Para", "둘째 줄")]
+    assert _cell_blocks(back[0]) == _cell_blocks(source)
+    caption_blocks = [(type(b).__name__, pf.stringify(b).strip()) for b in back[0].caption.content]
+    assert caption_blocks == [("Para", "제목 하나"), ("Para", "제목 둘")]
+
+
 def test_hwpx_to_docx_is_target_unsupported():
     res = convert(Source(hwpx_bytes(p(run("a"))), "a.hwpx", Format.HWPX), [Format.DOCX, Format.MD])
     errors = [e for e in res.report.events if e.code == Codes.TARGET_UNSUPPORTED]

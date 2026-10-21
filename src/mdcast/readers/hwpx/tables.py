@@ -154,6 +154,7 @@ def _head_rows(rows: list[list[_Slot]]) -> int:
         while count < len(rows) and real[count] and all(marked(s) for s in real[count]):
             count += 1
     grown = count
+    # pandoc cuts a rowspan at the thead/tbody boundary, moving the cells below it (R4)
     while (end := max((s.row + s.rowspan for row in rows[:grown] for s in row), default=0)) > grown:
         grown = end
     return 0 if grown > count and grown >= len(rows) else grown
