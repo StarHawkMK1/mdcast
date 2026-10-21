@@ -1,20 +1,27 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from mdcast.coverage import measure_coverage
 from mdcast.filters.importing import ImportContext, run_import_filters
 from mdcast.readers.docx import read_docx
+from mdcast.readers.hwpx import read_hwpx
+from mdcast.readers.imported import ImportedDocument
 from mdcast.report import Codes, Report
 from mdcast.types import Format, Options, Output, Result, Source
 from mdcast.writers.md import write_md
+
+READERS: dict[Format, Callable[[Source, Report, str], ImportedDocument]] = {
+    Format.DOCX: read_docx,
+    Format.HWPX: read_hwpx,
+}
 
 
 def import_document(
     source: Source, targets: Sequence[Format], options: Options, template: str | None = None
 ) -> Result:
-    """docx → MD. Only MD is a valid target; the images go along as ``{stem}_assets/{name}``."""
+    """docx·hwpx → MD. Only MD is a valid target; the images go along as ``{stem}_assets/{name}``."""
     report = Report(source.name, source.format)
     stem = Path(source.name).stem
     outputs = [Output(t, f"{stem}.{t.value}", None) for t in dict.fromkeys(targets)]
@@ -25,7 +32,7 @@ def import_document(
         if output.format is not Format.MD:
             report.error(
                 Codes.TARGET_UNSUPPORTED,
-                "docx 입력은 md 로만 변환합니다 (간접 변환은 아직 지원하지 않습니다)",
+                f"{source.format.value} 입력은 md 로만 변환합니다 (간접 변환은 아직 지원하지 않습니다)",
                 format=output.format.value,
             )
     md_output = next((o for o in outputs if o.format is Format.MD), None)
@@ -35,8 +42,8 @@ def import_document(
 
     assets_dir = f"{stem}_assets"
     try:
-        imp = read_docx(source, report, assets_dir)
-    except Exception as exc:  # noqa: BLE001 - any unreadable package is corrupt input
+        imp = READERS[source.format](source, report, assets_dir)
+    except Exception as exc:  # noqa: BLE001 - any unreadable package (HwpxError too) is corrupt input
         report.error(Codes.INPUT_CORRUPT, f"입력을 해석할 수 없습니다: {exc}")
         report.set_outputs(outputs)
         return Result(outputs, report)

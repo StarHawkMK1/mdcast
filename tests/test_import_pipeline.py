@@ -3,6 +3,7 @@ from pathlib import Path
 
 from docx_builder import strip_mdcast_metadata
 from helpers import export
+from hwpx_builder import hwpx_bytes, p, run
 
 from mdcast.pipeline import convert
 from mdcast.report import Codes, Level
@@ -41,11 +42,59 @@ def test_corrupt_docx_is_input_corrupt():
     assert res.outputs[0].data is None
 
 
-def test_hwpx_and_pdf_input_still_unsupported():
-    for fmt, mark in ((Format.HWPX, "M3b"), (Format.PDF, "M3c")):
-        res = convert(Source(b"x", f"a.{fmt.value}", fmt), [Format.MD])
-        events = [e for e in res.report.events if e.code == Codes.INPUT_UNSUPPORTED]
-        assert events and mark in events[0].message
+def test_pdf_input_still_unsupported():
+    res = convert(Source(b"x", "a.pdf", Format.PDF), [Format.MD])
+    events = [e for e in res.report.events if e.code == Codes.INPUT_UNSUPPORTED]
+    assert events and "M3c" in events[0].message
+
+
+def test_hwpx_converts_to_md_with_coverage():
+    result = convert(Source(hwpx_bytes(p(run("본문 글"))), "a.hwpx", Format.HWPX), [Format.MD])
+    assert result.outputs[0].data.decode().strip() == "본문 글" and result.report.coverage == 1.0
+
+
+def test_hwpx_formatting_headings_and_page_break_reach_md():
+    data = hwpx_bytes(
+        p(run("개요"), para="1"),
+        p(run("굵게", "1"), run(" 그리고 "), run("기울임", "2")),
+        p(run("다음 쪽"), page_break=True),
+        title="보고",
+        meta={"creator": "홍"},
+    )
+    result = convert(Source(data, "a.hwpx", Format.HWPX), [Format.MD])
+    md = result.outputs[0].data.decode()
+    assert md.startswith("---\n") and "title: 보고" in md and "author: 홍" in md
+    assert "# 개요" in md and "**굵게** 그리고 *기울임*" in md
+    assert "<!-- pagebreak -->\n\n다음 쪽" in md
+    assert result.report.coverage == 1.0
+
+
+def test_empty_hwpx_gives_empty_md_and_one_heading_warning():
+    result = convert(Source(hwpx_bytes(p()), "a.hwpx", Format.HWPX), [Format.MD])
+    out = result.outputs[0]
+    assert out.data is not None and out.data.decode().strip() == ""
+    assert result.report.outputs[0]["status"] != "failed" and result.report.coverage == 1.0
+    warnings = [(e.level, e.code) for e in result.report.events if e.level is not Level.INFO]
+    assert warnings == [(Level.WARN, Codes.IMPORT_HEADING_INFERRED)]
+
+
+def test_corrupt_hwpx_is_input_corrupt_without_traceback():
+    for data in (b"PK\x03\x04broken", hwpx_bytes(p(run("a")), encrypted=True)):
+        res = convert(Source(data, "a.hwpx", Format.HWPX), [Format.MD])
+        errors = [e for e in res.report.events if e.level is Level.ERROR]
+        assert [e.code for e in errors] == [Codes.INPUT_CORRUPT]
+        assert errors[0].message.startswith("입력을 해석할 수 없습니다: ") and "Traceback" not in errors[0].message
+        assert res.outputs[0].data is None and res.report.outputs[0]["status"] == "failed"
+    assert "암호" in errors[0].message or "보안" in errors[0].message
+
+
+def test_hwpx_to_docx_is_target_unsupported():
+    res = convert(Source(hwpx_bytes(p(run("a"))), "a.hwpx", Format.HWPX), [Format.DOCX, Format.MD])
+    errors = [e for e in res.report.events if e.code == Codes.TARGET_UNSUPPORTED]
+    assert len(errors) == 1 and errors[0].where.get("format") == "docx"
+    assert errors[0].message == "hwpx 입력은 md 로만 변환합니다 (간접 변환은 아직 지원하지 않습니다)"
+    outs = {o.format: o for o in res.outputs}
+    assert outs[Format.DOCX].data is None and outs[Format.MD].data.decode().strip() == "a"
 
 
 def test_template_is_ignored_for_docx(tmp_path):

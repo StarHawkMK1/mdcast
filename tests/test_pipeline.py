@@ -92,7 +92,7 @@ def test_writer_oserror_is_contained(tmp_path, monkeypatch):
 
 
 def test_non_md_input_is_unsupported(tmp_path):
-    result = pipeline.convert(Source(b"PK", "a.hwpx", Format.HWPX), [Format.MD], options=opts(tmp_path))
+    result = pipeline.convert(Source(b"%PDF", "a.pdf", Format.PDF), [Format.MD], options=opts(tmp_path))
     assert statuses(result) == {"md": "failed"}
     assert [e.code for e in result.report.events] == [Codes.INPUT_UNSUPPORTED]
 

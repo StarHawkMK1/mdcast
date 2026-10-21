@@ -283,3 +283,45 @@ def test_asset_outside_assets_folder_is_skipped(env, monkeypatch):
     assert (env / "x_assets" / "ok.png").is_file()
     assert not (env / "evil.png").exists() and not (env.parent / "e2.png").exists()
     assert r.output.count("저장하지 않습니다") >= 2
+
+
+def test_hwp_input_says_save_as_hwpx(env):
+    path = env / "옛 문서.HWP"
+    path.write_bytes(b"\xd0\xcf\x11\xe0")
+    r = run("convert", str(path))
+    assert r.exit_code == 2
+    assert "hwp 파일은 지원하지 않습니다. 한글에서 hwpx 로 저장해 넣으세요" in r.output
+
+
+def test_other_input_names_the_supported_kinds(env):
+    path = env / "a.txt"
+    path.write_text("x", encoding="utf-8")
+    r = run("convert", str(path))
+    assert r.exit_code == 2 and "(.md, .docx, .hwpx 파일을 지정하세요)" in r.output
+
+
+def test_convert_help_names_hwpx_import(env):
+    r = run("convert", "--help")
+    assert "MD 를 docx·hwpx·pdf 로, docx·hwpx 를 MD 로 변환합니다." in r.output
+
+
+def test_hwpx_default_target_is_md(env):
+    from hwpx_builder import hwpx_bytes, p
+    from hwpx_builder import run as hrun
+
+    (env / "x.hwpx").write_bytes(hwpx_bytes(p(hrun("개요"), para="1"), p(hrun("본문"))))
+    r = run("convert", str(env / "x.hwpx"))
+    assert r.exit_code == 0, r.output
+    assert (env / "x.md").read_text(encoding="utf-8").split() == ["#", "개요", "본문"]
+    assert "내용 보존 100.0%" in r.output
+
+
+def test_encrypted_hwpx_cli_exit_1_no_traceback(env):
+    from hwpx_builder import hwpx_bytes, p
+    from hwpx_builder import run as hrun
+
+    (env / "x.hwpx").write_bytes(hwpx_bytes(p(hrun("a")), encrypted=True))
+    r = run("convert", str(env / "x.hwpx"))
+    assert r.exit_code == 1 and isinstance(r.exception, SystemExit) and "Traceback" not in r.output
+    assert "입력을 해석할 수 없습니다" in r.output and ("암호" in r.output or "보안" in r.output)
+    assert not (env / "x.md").exists() and not (env / "x_assets").exists()
