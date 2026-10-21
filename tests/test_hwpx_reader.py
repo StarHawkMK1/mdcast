@@ -565,6 +565,16 @@ def test_hand_typed_number_after_native_list_still_merges_via_import_filters():
     assert kinds(back.content) == ["OrderedList"] and items(back.content[0]) == ["하나", "둘", "셋"]
 
 
+def test_list_in_table_caption_converts():
+    table = tbl([[cell(p(run("칸")), col=0, row=0)]], cols=1)
+    data = hwpx_bytes(p(_with_caption(table, p(run("가"), para="5"), p(run("나"), para="3"))))
+    assert kinds(only_table(_with_caption(table, p(run("가"), para="5"))).caption.content) == ["BulletList"]
+    result = convert(Source(data, "a.hwpx", Format.HWPX), [Format.MD])
+    assert result.report.coverage == 1.0
+    back = read_md(Source(result.outputs[0].data, "a.md", Format.MD), Report("a.md", Format.MD)).doc
+    assert kinds(back.content[0].caption.content) == ["BulletList", "OrderedList"]
+
+
 def _shape(blocks) -> list:
     """Block kinds, list starts and text, nested lists and table cells included."""
     out = []
