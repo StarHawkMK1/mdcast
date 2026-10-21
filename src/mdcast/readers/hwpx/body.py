@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 
 import panflute as pf
 from lxml import etree
 
 from mdcast.readers.docx_package import PAGEBREAK_SENTINEL
 from mdcast.readers.hwpx.package import HP, CharStyle, HwpxPackage, ParaStyle
+from mdcast.readers.hwpx.tables import read_table
 from mdcast.report import Report
 
 _PLAIN = CharStyle()
@@ -23,16 +25,25 @@ def hp(tag: str) -> str:
     return f"{{{HP}}}{tag}"
 
 
-_T, _RUN, _P = hp("t"), hp("run"), hp("p")
+_T, _RUN, _P, _TBL = hp("t"), hp("run"), hp("p"), hp("tbl")
 _SPACE_MARKS = (hp("tab"), hp("nbSpace"), hp("fwSpace"))
 _LINE_BREAK = hp("lineBreak")
 
 
-def _own_text(p: etree._Element) -> str:
-    """The paragraph's own ``hp:t`` text, leaving out paragraphs nested in its tables or notes."""
-    return "".join(
-        "".join(t.itertext()) for t in p.iter(_T) if next(t.iterancestors(_P), None) is p
-    )
+def _own_texts(p: etree._Element) -> list[str]:
+    """The paragraph's own ``hp:t`` text, leaving out paragraphs nested in its tables or notes.
+
+    A table splits the text in two, as the reader makes a block before and after it.
+    """
+    pieces: list[list[str]] = [[]]
+    for e in p.iter(_T, _TBL):
+        if next(e.iterancestors(_P), None) is not p:
+            continue
+        if e.tag == _TBL:
+            pieces.append([])
+        else:
+            pieces[-1].append("".join(e.itertext()))
+    return ["".join(piece) for piece in pieces]
 
 
 def _tokens(pieces: list[str | pf.Inline]) -> list[pf.Inline]:
@@ -140,17 +151,31 @@ class BodyReader:
         self.pkg = pkg
         self.report = report
         self.assets = assets  # Task 6 gives this its type; None until pictures are read
-        # every paragraph's own text, nested ones (table cells, notes) as their own entries; it is
-        # taken from the XML, not from what this reader makes, so the coverage check sees what it drops
+        # every paragraph's own text (split around its tables), nested ones (table cells, notes) as
+        # their own entries; it is taken from the XML, not from what this reader makes, so the
+        # coverage check sees what it drops
         self.source_text: list[str] = [
-            text for section in pkg.sections for p in section.iter(_P) if (text := _own_text(p))
+            text
+            for section in pkg.sections
+            for p in section.iter(_P)
+            for text in _own_texts(p)
+            if text
         ]
 
     def blocks(self) -> list[pf.Block]:
+        return self.paragraphs(
+            (p for section in self.pkg.sections for p in section.iterchildren(_P)), in_cell=False
+        )
+
+    def sub_list(self, sub: etree._Element | None) -> list[pf.Block]:
+        """The blocks of an ``hp:subList`` (a table cell or caption); none when it is missing."""
+        return [] if sub is None else self.paragraphs(sub.iterchildren(_P), in_cell=True)
+
+    def paragraphs(self, ps: Iterable[etree._Element], *, in_cell: bool) -> list[pf.Block]:
+        """A run of sibling paragraphs (a section's or a cell's) → their blocks, in order."""
         out: list[pf.Block] = []
-        for section in self.pkg.sections:
-            for p in section.iterchildren(_P):
-                out.extend(self.paragraph(p, in_cell=False))
+        for p in ps:
+            out.extend(self.paragraph(p, in_cell=in_cell))
         return out
 
     def paragraph(self, p: etree._Element, *, in_cell: bool) -> list[pf.Block]:
@@ -171,7 +196,14 @@ class BodyReader:
             for child in run:
                 if child.tag == _T:
                     line.text(child, char)
-                # a block object (table, text box) calls flush(), then adds its own blocks
+                elif child.tag == _TBL:
+                    flush()
+                    table = read_table(child, self)
+                    if table.colspec:
+                        blocks.append(table)
+                    else:  # no cells: an empty <table> would only be noise; keep a caption's text
+                        blocks.extend(table.caption.content)
+                # other block objects (text boxes) will do the same: flush(), then their own blocks
         flush()
         return blocks
 

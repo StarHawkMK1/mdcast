@@ -1,12 +1,16 @@
 import shutil
 from pathlib import Path
 
+import panflute as pf
 from docx_builder import strip_mdcast_metadata
 from helpers import export
-from hwpx_builder import hwpx_bytes, p, run
+from hwpx_builder import cell, hwpx_bytes, p, run, tbl
 
+from mdcast.ast import grid_cells
 from mdcast.pipeline import convert
-from mdcast.report import Codes, Level
+from mdcast.readers.hwpx import read_hwpx
+from mdcast.readers.md import read_md
+from mdcast.report import Codes, Level, Report
 from mdcast.types import Format, Source
 
 SAMPLE = Path(__file__).parent / "fixtures" / "md" / "assets" / "sample.png"
@@ -86,6 +90,33 @@ def test_corrupt_hwpx_is_input_corrupt_without_traceback():
         assert errors[0].message.startswith("입력을 해석할 수 없습니다: ") and "Traceback" not in errors[0].message
         assert res.outputs[0].data is None and res.report.outputs[0]["status"] == "failed"
     assert "암호" in errors[0].message or "보안" in errors[0].message
+
+
+def _hwpx_grid(table) -> list[list[tuple[str, int, int, int]]]:
+    rows = list(table.head.content) + [row for body in table.content for row in body.content]
+    starts = {id(c): col for c, col in grid_cells(rows)}
+    return [[(pf.stringify(c).strip(), starts[id(c)], c.rowspan, c.colspan) for c in row.content] for row in rows]
+
+
+def test_hwpx_table_spans_survive_md_round_trip():
+    inner = tbl([[cell(p(run("안")), col=0, row=0), cell(p(run("쪽")), col=1, row=0)]], cols=2)
+    rows = [
+        [cell(p(run("구분")), col=0, row=0, rowspan=2), cell(p(run("값")), col=1, row=0, colspan=2)],
+        [cell(p(run("상")), col=1, row=1), cell(p(run("하")), col=2, row=1)],
+        [cell(p(run("x")), col=0, row=2), cell(p(inner), col=1, row=2, colspan=2)],
+        [cell(p(run("y")), col=0, row=3, colspan=2), cell(p(run("z")), col=2, row=3)],
+    ]
+    data = hwpx_bytes(p(tbl(rows, cols=3)))
+    report = Report("a.hwpx", Format.HWPX)
+    source = read_hwpx(Source(data, "a.hwpx", Format.HWPX), report, "a_assets").doc.content[0]
+    result = convert(Source(data, "a.hwpx", Format.HWPX), [Format.MD])
+    assert result.report.coverage == 1.0
+    back = read_md(Source(result.outputs[0].data, "a.md", Format.MD), Report("a.md", Format.MD)).doc.content
+    assert [type(b).__name__ for b in back] == ["Table"]
+    assert _hwpx_grid(back[0]) == _hwpx_grid(source)
+    assert len(back[0].head.content) == len(source.head.content) == 2
+    nested = [e for e in back[0].content[0].content[0].content[1].content if isinstance(e, pf.Table)]
+    assert len(nested) == 1 and _hwpx_grid(nested[0]) == [[("안", 0, 1, 1), ("쪽", 1, 1, 1)]]
 
 
 def test_hwpx_to_docx_is_target_unsupported():
