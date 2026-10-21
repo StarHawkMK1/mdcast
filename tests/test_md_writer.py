@@ -436,6 +436,8 @@ def test_line_starting_with_colon_after_hard_break_stays_text():
         doc_with(pf.Para(pf.Str("a")), pf.Para(pf.Str(":"), pf.Space(), pf.Str("b"))),
         doc_with(pf.Para(pf.Str("a"), pf.LineBreak(), pf.Str("~"), pf.Space(), pf.Str("b"))),
         doc_with(pf.Para(pf.Strong(pf.Str("a"), pf.LineBreak(), pf.Str(":"), pf.Space(), pf.Str("b")))),
+        doc_with(pf.Para(pf.Strong(pf.Str("a"), pf.LineBreak()), pf.Str(":"), pf.Space(), pf.Str("b"))),
+        doc_with(pf.Para(pf.Emph(pf.Str("a"), pf.LineBreak()), pf.Str(":"), pf.Space(), pf.Str("b"))),
         doc_with(pf.BulletList(pf.ListItem(pf.Plain(pf.Str("a"), pf.LineBreak(), pf.Str(":"), pf.Space(), pf.Str("b"))))),
         doc_with(pf.Para(pf.Str("x")), pf.BlockQuote(pf.Para(pf.Str("a")), pf.Para(pf.Str(":"), pf.Space(), pf.Str("b")))),
     ]
@@ -446,6 +448,35 @@ def test_line_starting_with_colon_after_hard_break_stays_text():
         assert pf.stringify(again) == pf.stringify(doc), md
         assert first_or_none(again, pf.DefinitionList) is None, md
         assert "\\: b" in md or "\\~ b" in md, md
+
+
+def test_break_at_the_end_of_a_container_puts_the_next_text_at_a_line_start():
+    from mdcast.writers.md import _escape_line_starts
+
+    for kind in (pf.Strong, pf.Emph):
+        para = pf.Para(kind(pf.Str("a"), pf.LineBreak()), pf.Str(":"), pf.Space(), pf.Str("b"))
+        _escape_line_starts(para.content, True)
+        assert [type(e).__name__ for e in para.content][1:3] == ["RawInline", "Space"]
+
+
+def test_breaks_at_the_edge_of_emphasis_keep_their_shape():
+    r"""``**a\`` + newline + ``**`` would read back as literal asterisks: the break goes outside."""
+    cases = [
+        (pf.Para(pf.Strong(pf.Str("a"), pf.LineBreak()), pf.Str("b")), ["Strong", "LineBreak", "Str"]),
+        (pf.Para(pf.Emph(pf.Str("a"), pf.LineBreak()), pf.Str("b")), ["Emph", "LineBreak", "Str"]),
+        (pf.Para(pf.Strikeout(pf.Str("a"), pf.LineBreak()), pf.Str("b")), ["Strikeout", "LineBreak", "Str"]),
+        (pf.Para(pf.Str("a"), pf.Strong(pf.LineBreak(), pf.Str("b"))), ["Str", "LineBreak", "Strong"]),
+        (pf.Para(pf.Strong(pf.Emph(pf.Str("a"), pf.LineBreak())), pf.Str("b")), ["Strong", "LineBreak", "Str"]),
+        # pandoc writes no space before a hard break
+        (pf.Para(pf.Strong(pf.Str("a"), pf.Space(), pf.LineBreak()), pf.Str("b")), ["Strong", "LineBreak", "Str"]),
+    ]
+    for para, shape in cases:
+        md = write_md(doc_with(para), {})
+        again = back(md)
+        assert [type(e).__name__ for e in again.content[0].content] == shape, md
+        assert "*" not in pf.stringify(again), md
+        # written again, it comes back the same
+        assert back(write_md(again, {})).content[0].to_json() == again.content[0].to_json(), md
 
 
 def first_or_none(doc: pf.Doc, kind):

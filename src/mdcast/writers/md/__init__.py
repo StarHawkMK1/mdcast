@@ -79,9 +79,42 @@ def _figure_blocks(figure: pf.Figure) -> list[pf.Block]:
     return [pf.Para(*b.content) if isinstance(b, pf.Plain) else b for b in blocks]
 
 
+_EDGE_BREAKS = (pf.LineBreak, pf.SoftBreak, pf.Space)
+# inlines written between delimiter runs (``**``, ``*``, ``~~``): a run next to a break is not a delimiter
+_DELIMITED = (pf.Emph, pf.Strong, pf.Strikeout)
+
+
+def _breaks_outside(inlines: pf.ListContainer) -> None:
+    """Move the breaks and spaces at either edge of emphasis to just before / after it.
+
+    A run written as ``**a`` + hard break + ``**`` cannot close: pandoc reads the asterisks back as
+    text and loses the emphasis and the break (a line starting ``: `` after it even becomes a
+    definition).
+    """
+    out: list[pf.Inline] = []
+    for elem in inlines:
+        if not isinstance(elem, _DELIMITED):
+            out.append(elem)
+            continue
+        content = list(elem.content)
+        lead: list[pf.Inline] = []
+        trail: list[pf.Inline] = []
+        while content and isinstance(content[0], _EDGE_BREAKS):
+            lead.append(content.pop(0))
+        while content and isinstance(content[-1], _EDGE_BREAKS):
+            trail.insert(0, content.pop())
+        if lead or trail:
+            elem.content = content
+        out += [*lead, elem, *trail] if content else [*lead, *trail]
+    inlines[:] = out
+
+
 def _prepare(elem: pf.Element, _doc: pf.Doc):
     if isinstance(elem, pf.Figure):
         return _figure_blocks(elem)
+    content = getattr(elem, "content", None)
+    if isinstance(content, pf.ListContainer) and any(isinstance(e, _DELIMITED) for e in content):
+        _breaks_outside(content)  # bottom-up: inner emphasis already gave its breaks to this one
     if isinstance(elem, pf.Image):
         if _SCHEME.match(elem.url):
             elem.url = elem.url.replace(" ", "%20")
@@ -114,9 +147,10 @@ def _escape_line_starts(inlines: pf.ListContainer, at_start: bool) -> bool:
         elif isinstance(elem, pf.Span):
             at_start = _escape_line_starts(elem.content, at_start)
         else:
-            if not isinstance(elem, pf.Note) and isinstance(getattr(elem, "content", None), pf.ListContainer):
-                _escape_line_starts(elem.content, False)
             at_start = False
+            if not isinstance(elem, pf.Note) and isinstance(getattr(elem, "content", None), pf.ListContainer):
+                # a break at its end puts the next inline at the start of a line
+                at_start = _escape_line_starts(elem.content, False)
         out.append(elem)
     inlines[:] = out
     return at_start
