@@ -113,6 +113,14 @@ def test_unreadable_section_is_hwpx_error_naming_security():
         open_hwpx(data)
 
 
+@pytest.mark.parametrize("part", ["Contents/content.hpf", "Contents/header.xml"])
+def test_unreadable_content_or_header_is_hwpx_error_naming_security(part):
+    data = _replace(hwpx_bytes(p(run("a"))), part, b"\x93\x11\xfe garbled")
+    with pytest.raises(HwpxError, match="암호|보안") as caught:
+        open_hwpx(data)
+    assert part in str(caught.value)
+
+
 def _read(*sections: str, **kw):
     report = Report("a.hwpx", Format.HWPX)
     return read_hwpx(Source(hwpx_bytes(*sections, **kw), "a.hwpx", Format.HWPX), report, "a_assets"), report

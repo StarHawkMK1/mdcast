@@ -156,15 +156,76 @@ def _escape_line_starts(inlines: pf.ListContainer, at_start: bool) -> bool:
     return at_start
 
 
+_SCRIPT_MARKS = "~^"  # ``~a~`` / ``^a^`` read back as subscript / superscript (pandoc's markdown)
+_PAIR_ENDS = " \t\n"  # only these end such a pair: a no-break space does not
+_RUN_ENDS = (pf.Space, pf.SoftBreak, pf.LineBreak)
+_LITERAL = (pf.Code, pf.Math, pf.RawInline, pf.Note)  # no marks of their own to read; a note's blocks are walked apart
+
+
+def _escape_pairs(inlines: pf.ListContainer) -> None:
+    """Escape every ``~`` / ``^`` that a later one in the same unbroken run would pair with.
+
+    A run is what lies between spaces and breaks; inlines inside it (bold, links, note marks) do
+    not end it, as they do not end a pair. The last mark of a run is left as it is, so a lone
+    ``~`` (``2026.1~2026.12``, ``10~20 %``) is written bare.
+    """
+    for elem in inlines:
+        if not isinstance(elem, _LITERAL) and isinstance(getattr(elem, "content", None), pf.ListContainer):
+            _escape_pairs(elem.content)
+    marks: list[tuple[int, int, str]] = []  # (inline, character, mark) of the run so far
+    escape: set[tuple[int, int]] = set()
+
+    def end_run() -> None:
+        for mark in _SCRIPT_MARKS:
+            found = [(i, j) for i, j, m in marks if m == mark]
+            escape.update(found[:-1])
+        marks.clear()
+
+    for i, elem in enumerate(inlines):
+        if isinstance(elem, _RUN_ENDS):
+            end_run()
+        elif isinstance(elem, pf.Str):
+            for j, char in enumerate(elem.text):
+                if char in _PAIR_ENDS:
+                    end_run()
+                elif char in _SCRIPT_MARKS:
+                    marks.append((i, j, char))
+    end_run()
+    if not escape:
+        return
+    out: list[pf.Inline] = []
+    for i, elem in enumerate(inlines):
+        cuts = sorted(j for k, j in escape if k == i)
+        if not cuts:
+            out.append(elem)
+            continue
+        start = 0
+        for j in cuts:
+            if j > start:
+                out.append(pf.Str(elem.text[start:j]))
+            out.append(pf.RawInline("\\" + elem.text[j], "gfm"))
+            start = j + 1
+        if start < len(elem.text):
+            out.append(pf.Str(elem.text[start:]))
+    inlines[:] = out
+
+
+def _escape_block_pairs(elem: pf.Element, _doc: pf.Doc):
+    if isinstance(elem, (pf.Para, pf.Plain, pf.Header)):
+        _escape_pairs(elem.content)
+
+
 def _line_starts(elem: pf.Element, _doc: pf.Doc):
     """Keep every block's lines what they are when read back (R7).
 
     A heading is one ATX line, so a hard break in it is written as a space; a paragraph line that
-    starts with a definition mark gets the mark escaped.
+    starts with a definition mark gets the mark escaped. ``~`` / ``^`` pairs are escaped in both.
     """
     if isinstance(elem, pf.Header):
         elem.walk(lambda e, d: pf.Space() if isinstance(e, pf.LineBreak) else None)
+        _escape_pairs(elem.content)
     elif isinstance(elem, (pf.Para, pf.Plain)):
+        _escape_pairs(elem.content)
         _escape_line_starts(elem.content, True)
 
 
@@ -182,6 +243,8 @@ def write_md(doc: pf.Doc, frontmatter: dict[str, Any]) -> str:
     def action(elem: pf.Element, _doc: pf.Doc):
         if isinstance(elem, pf.Table):
             if is_simple_table(elem):
+                # a pipe cell is markdown too, and its text is taken now: escape its pairs first
+                elem.walk(_escape_block_pairs)
                 return pf.RawBlock(table_to_pipe(elem, pipe_cells), "gfm")
             return pf.RawBlock(table_to_html(elem, note_label, html_cells), "html")
         return None

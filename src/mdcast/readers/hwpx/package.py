@@ -22,6 +22,8 @@ _HEADER = "Contents/header.xml"
 _MANIFEST = "META-INF/manifest.xml"
 _NO_STRIKE = ("NONE", "3D")  # Hancom writes shape="3D" on text that is not struck through
 _SECURED = "암호가 걸렸거나 문서 보안(DRM)이 적용된 hwpx 는 읽을 수 없습니다. 한글에서 보안을 푼 뒤 다시 저장해 주십시오."
+# a package part that is not XML: plain damage, or a secured document whose parts are scrambled
+_UNREADABLE = "hwpx 파일의 {} 을(를) XML 로 읽을 수 없습니다. 파일이 깨졌거나 보안(암호)이 걸려 있을 수 있습니다."
 
 
 class HwpxError(Exception):
@@ -227,12 +229,12 @@ def open_hwpx(data: bytes) -> HwpxPackage:
     with archive:
         if _is_encrypted(archive):
             raise HwpxError(_SECURED)
-        content = _parse(archive, _CONTENT)
+        content = _parse(archive, _CONTENT, _UNREADABLE.format(_CONTENT))
         items = {item.get("id"): item.get("href") or "" for item in _opf(content, "manifest/item")}
         names = set(archive.namelist())
 
         header_href = items.get("header") or _HEADER
-        header = _parse(archive, header_href) if header_href in names else None
+        header = _parse(archive, header_href, _UNREADABLE.format(header_href)) if header_href in names else None
 
         sections = []
         for ref in _opf(content, "spine/itemref"):

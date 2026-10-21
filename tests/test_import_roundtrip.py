@@ -209,3 +209,28 @@ def test_hwpx_roundtrip_keeps_body(tmp_path, name, template):
     assert back.frontmatter.get("template") == (template or "default")
     assert result.report.coverage == 1.0
     assert not [e for e in result.report.events if e.code == Codes.IMPORT_TABLE_UNWRAPPED]  # no form tables here
+
+
+def _cells(doc: pf.Doc) -> list[str]:
+    tables = [b for b in doc.content if isinstance(b, pf.Table)]
+    assert len(tables) == 1
+    out: list[str] = []
+    tables[0].walk(lambda e, _d: out.append(pf.stringify(e).strip()) if isinstance(e, pf.TableCell) else None)
+    return out
+
+
+@pytest.mark.parametrize("target", [Format.DOCX, Format.HWPX])
+def test_long_definition_table_comes_back_as_a_table(tmp_path, target):
+    """R21: a 2-column MD table of terms and long definitions is not a form; its bold header is gone by the form filter."""
+    rows = "\n".join(f"| {term} | {('뜻풀이 문장 ' * 32).strip()}{term} |" for term in ("가", "나", "다"))
+    md = f"# 개요\n\n| 용어 | 정의 |\n|---|---|\n{rows}\n"
+    original = _read(md, tmp_path)
+    data = export(tmp_path, md, target)
+    result = convert(
+        Source(data, f"x.{target.value}", target), [Format.MD], options=Options(cwd=tmp_path, home=tmp_path / "home")
+    )
+    back = _read(result.outputs[0].data.decode("utf-8"), tmp_path)
+    assert [type(b).__name__ for b in back.doc.content] == ["Header", "Table"]
+    assert _cells(back.doc) == _cells(original.doc)
+    assert result.report.coverage == 1.0
+    assert not [e for e in result.report.events if e.code == Codes.IMPORT_TABLE_UNWRAPPED]

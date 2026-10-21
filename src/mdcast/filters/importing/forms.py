@@ -108,6 +108,8 @@ def classify(table: pf.Table) -> list[Row] | None:
                 return None
         else:
             return None
+    if not plan:
+        return None  # no rows
     kind, first_label, first_content = plan[0]
     if kind == "pair" and _is_label(first_label, bold=True) and _is_label(first_content, bold=True):
         return None  # column names over both columns: a grid with a header row (§5.1)
@@ -164,6 +166,10 @@ class _Unwrapper:
 
 
 def apply(doc: pf.Doc, ctx: ImportContext) -> pf.Doc:
+    if ctx.generator:
+        # an mdcast document's tables were written from MD tables, never forms; its header row's bold
+        # is already gone (mdcast_doc), so the column-name guard could not see it (R21, D11)
+        return doc
     unwrapper = _Unwrapper()
     out: list[pf.Block] = []
     above = 0  # level of the nearest heading the document had before this filter

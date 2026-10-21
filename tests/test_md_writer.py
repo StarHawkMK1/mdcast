@@ -514,3 +514,91 @@ def test_superscript_and_subscript_round_trip():
     again = back(write_md(doc, {}))
     assert [type(i).__name__ for i in again.content[0].content] == ["Str", "Superscript", "Str", "Subscript"]
     assert pf.stringify(again) == pf.stringify(doc)
+
+
+
+def scripts(doc: pf.Doc) -> list[pf.Element]:
+    found: list = []
+    doc.walk(lambda e, d: found.append(e) if isinstance(e, (pf.Superscript, pf.Subscript)) else None)
+    return found
+
+
+def paired() -> list[list[pf.Inline]]:
+    """Text pandoc's markdown would read as ``~sub~`` / ``^super^`` if written bare."""
+    return [
+        [pf.Str("서울~대전~부산")],
+        [pf.Str("1~2~3단계")],
+        [pf.Str("2^10^")],
+        [pf.Str("a~b~c~d")],
+        [pf.Str("~~x~~")],
+        [pf.Str("a~\u00a0b~c")],  # a no-break space does not end a pair
+        [pf.Str("서울~"), pf.Strong(pf.Str("대전")), pf.Str("~부산")],  # one pair over three inlines
+        [pf.Str("가^"), pf.Str("나^다")],
+    ]
+
+
+def test_tilde_and_caret_pairs_in_body_and_heading_stay_text():
+    for make in (lambda i: pf.Para(*i), lambda i: pf.Header(*i, level=2)):
+        for inlines in paired():
+            doc = doc_with(make(inlines), pf.Para(pf.Str("끝")))
+            md = write_md(doc, {})
+            again = back(md)
+            assert kinds(again) == kinds(doc), md
+            assert scripts(again) == [], md
+            assert pf.stringify(again) == pf.stringify(doc), md
+
+
+def test_tilde_and_caret_pairs_in_pipe_cells_stay_text():
+    for inlines in paired():
+        if "\u00a0" in pf.stringify(pf.Plain(*inlines)):
+            continue  # a pipe cell's text is squeezed: its no-break space becomes a space (as before)
+        doc = doc_with(make_table([[cell(txt("h")), cell(txt("i"))]], [[cell(pf.Plain(*inlines)), cell(txt("2^3^"))]]))
+        md = write_md(doc, {})
+        assert "<table>" not in md, md
+        again = back(md)
+        assert scripts(again) == [], md
+        assert pf.stringify(again) == pf.stringify(doc), md
+
+
+def test_tilde_and_caret_pairs_in_cell_notes_stay_text():
+    for inlines in paired():
+        note = pf.Note(pf.Para(*inlines), pf.Para(pf.Str("x^y^z")))
+        doc = doc_with(make_table([[cell(txt("h")), cell(txt("i"))]], [[cell(pf.Plain(pf.Str("v"), note), colspan=2)]]))
+        md = write_md(doc, {})
+        assert "[^t1]:" in md, md
+        again = back(md)
+        assert scripts(again) == [], md
+        assert pf.stringify(first(again, pf.Note)) == pf.stringify(note), md
+
+
+def test_tilde_pairs_in_html_cells_are_left_bare():
+    """An HTML cell reads ``~`` as text, and a raw gfm escape there would be dropped."""
+    doc = doc_with(make_table([[cell(txt("h")), cell(txt("i"))]], [[cell(txt("서울~대전~부산"), colspan=2)]]))
+    md = write_md(doc, {})
+    assert "<table>" in md and "\\" not in md, md
+    again = back(md)
+    assert scripts(again) == []
+    assert pf.stringify(again) == pf.stringify(doc)
+
+
+def test_lone_tilde_and_pairs_split_by_spaces_are_not_escaped():
+    lone = [
+        [pf.Str("2026.1~2026.12")],
+        [pf.Str("10~20"), pf.Space(), pf.Str("%")],
+        [pf.Str("a~b"), pf.Space(), pf.Str("c~d")],
+        [pf.Str("x^2"), pf.Space(), pf.Str("y^2")],
+    ]
+    for inlines in lone:
+        doc = doc_with(pf.Para(pf.Str("앞"), pf.Space(), *inlines))
+        md = write_md(doc, {})
+        assert "\\" not in md, md
+        assert pf.stringify(back(md)) == pf.stringify(doc), md
+
+
+def test_real_scripts_are_still_written_as_tags_beside_escaped_pairs():
+    doc = doc_with(pf.Para(pf.Str("a~b~c"), pf.Superscript(pf.Str("2")), pf.Subscript(pf.Str("i"))))
+    md = write_md(doc, {})
+    assert "<sup>2</sup>" in md and "<sub>i</sub>" in md, md
+    again = back(md)
+    assert [type(i).__name__ for i in again.content[0].content] == ["Str", "Superscript", "Subscript"]
+    assert pf.stringify(again) == pf.stringify(doc)

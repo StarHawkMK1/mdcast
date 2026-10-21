@@ -315,6 +315,25 @@ def test_column_name_row_table_stays():
     assert forms.classify(t2) is not None
 
 
+def test_two_column_table_without_rows_stays():
+    t = table([cell(plain("가")), cell(*two_paras("가"))])
+    t.content[0].content.clear()  # an hwpx table with no rows (panflute checks columns only when built)
+    assert forms.classify(t) is None
+    r = Run(t)
+    assert [type(b).__name__ for b in r.doc.content] == ["Table"]
+
+
+def test_mdcast_document_tables_are_never_unwrapped():
+    """R21: a table in an mdcast-made document was an MD table; its header bold is gone by now."""
+    t = side_by_side("이름", "주소")
+    assert forms.classify(t) is not None  # a form anywhere else
+    report = Report("a.hwpx", Format.HWPX)
+    ctx = ImportContext(report, {}, {"mdcast.generator": "mdcast 0.1"}, Path("."), Path("."))
+    doc = forms.apply(pf.Doc(t), ctx)
+    assert [type(b).__name__ for b in doc.content] == ["Table"]
+    assert [e for e in report.events if e.code == Codes.IMPORT_TABLE_UNWRAPPED] == []
+
+
 def test_picture_cell_is_not_a_label():
     pic = pf.Plain(pf.Image(pf.Str("그림"), url="a.png"))
     t = table(
