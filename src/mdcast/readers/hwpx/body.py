@@ -127,6 +127,15 @@ _LIST_KINDS = ("NUMBER", "BULLET")
 _LISTS = (pf.OrderedList, pf.BulletList)
 
 
+def _is_sentinel(block: pf.Block) -> bool:
+    return isinstance(block, pf.Para) and pf.stringify(block, newlines=False) == PAGEBREAK_SENTINEL
+
+
+def _is_text(block: pf.Block) -> bool:
+    """A Para or Plain the MD writer keeps as text (the page-break mark becomes a raw block)."""
+    return isinstance(block, (pf.Para, pf.Plain)) and not _is_sentinel(block)
+
+
 class _Frame:
     """An open list while its paragraphs are grouped: its level and each item's blocks."""
 
@@ -136,10 +145,14 @@ class _Frame:
         self.items: list[list[pf.Block]] = []
 
     def to_list(self, kind: str) -> pf.Block:
-        # pandoc writes a list tight (no blank lines) when no item has a second block besides its
-        # nested lists, and tight items read back as Plain; an item holding more (a table, a
-        # page-break mark) makes it write the whole list loose, which reads back as Para
-        loose = any(sum(not isinstance(b, _LISTS) for b in item) > 1 for item in self.items)
+        # pandoc writes a list tight only when every item starts with text and has no second block
+        # besides its nested lists; tight items read back as Plain. Anything else (an item that is
+        # a table or a page-break mark, or holds one after its text) makes it write the whole list
+        # loose, which reads back as Para (ruling R6a)
+        loose = any(
+            not _is_text(item[0]) or sum(not isinstance(b, _LISTS) for b in item) > 1
+            for item in self.items
+        )
         text = pf.Para if loose else pf.Plain
         items = [
             pf.ListItem(
@@ -189,8 +202,9 @@ def group_lists(
 
     Paragraphs of one kind and ``list_id`` that follow each other are one list (spec §4.4); a
     paragraph without blocks is passed over, so an empty line does not split a list Hancom numbers
-    on across. All of a paragraph's blocks go into its item. A numbered list starts at its
-    numbering's first number (``starts``); the number shape is dropped.
+    on across. All of a paragraph's blocks go into its item, except a page break on a list's first
+    paragraph, which goes before the list. A numbered list starts at its numbering's first number
+    (``starts``); the number shape is dropped.
     """
     out: list[pf.Block] = []
     run: list[tuple[int, list[pf.Block]]] = []
@@ -205,7 +219,11 @@ def group_lists(
         key = this
         if this is None:
             out.extend(blocks)
-        else:
+            continue
+        if not run and _is_sentinel(blocks[0]):
+            out.append(blocks[0])
+            blocks = blocks[1:]
+        if blocks:
             run.append((style.level, blocks))
     if run:
         out.append(_nest(key[0], starts.get(key[1] or "", 1), run))

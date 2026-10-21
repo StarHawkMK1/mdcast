@@ -586,6 +586,8 @@ def _shape(blocks) -> list:
         elif isinstance(b, pf.Table):
             rows = list(b.head.content) + [row for body in b.content for row in body.content]
             out.append(("Table", [[_shape(c.content) for c in row.content] for row in rows]))
+        elif text(b) == PAGEBREAK_SENTINEL or (isinstance(b, pf.RawBlock) and "pagebreak" in b.text):
+            out.append(("pagebreak",))  # the import filters turn the reader's mark into a raw block
         else:
             out.append((type(b).__name__, text(b)))
     return out
@@ -615,3 +617,33 @@ def test_native_lists_survive_md_round_trip():
     assert _shape(back.content) == _shape(source.content)
     shape = [k for k, *_ in _shape(source.content)]
     assert shape == ["OrderedList", "Para", "OrderedList", "BulletList", "Para", "BulletList", "Table"]
+
+
+def test_list_item_of_only_a_table_or_page_break_survives_md_round_trip():
+    table = tbl([[cell(p(run("칸")), col=0, row=0)]], cols=1)
+    data = hwpx_bytes(
+        p(run("쪽 앞"), para="5", page_break=True),
+        p(run("둘"), para="5"),
+        p(run("본문")),
+        p(run("가"), para="3"),
+        p(table, para="3"),
+        p(run("다"), para="3"),
+        p(run("본문 둘")),
+        p(run("라"), para="5"),
+        p(para="5", page_break=True),
+        p(run("마"), para="5"),
+    )
+    report = Report("a.hwpx", Format.HWPX)
+    source = read_hwpx(Source(data, "a.hwpx", Format.HWPX), report, "a_assets").doc
+    blocks = source.content
+    assert kinds(blocks) == ["Para", "BulletList", "Para", "OrderedList", "Para", "BulletList"]
+    # a page break on a list's first paragraph goes before the list; the list stays tight
+    assert text(blocks[0]) == PAGEBREAK_SENTINEL and items(blocks[1]) == ["쪽 앞", "둘"]
+    assert [kinds(i.content) for i in blocks[1].content] == [["Plain"], ["Plain"]]
+    # an item that starts with anything but text makes pandoc write the list loose (R6a)
+    assert [kinds(i.content) for i in blocks[3].content] == [["Para"], ["Table"], ["Para"]]
+    assert [kinds(i.content) for i in blocks[5].content] == [["Para"], ["Para"], ["Para"]]
+    result = convert(Source(data, "a.hwpx", Format.HWPX), [Format.MD])
+    assert result.report.coverage == 1.0
+    back = read_md(Source(result.outputs[0].data, "a.md", Format.MD), Report("a.md", Format.MD)).doc
+    assert _shape(back.content) == _shape(source.content)
