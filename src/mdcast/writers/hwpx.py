@@ -14,7 +14,8 @@ from mdcast.counters import format_counter
 from mdcast.fields import PageField, ResolvedFields
 from mdcast.filters.tables import table_settings
 from mdcast.report import Codes
-from mdcast.units import normalize_color, page_size_mm, parse_length_mm, parse_pt, parse_ratio
+from mdcast.templates.hwpx_looks import family, hex_color, look_values
+from mdcast.units import page_size_mm, parse_length_mm, parse_pt, parse_ratio
 from mdcast.writers.context import RenderError, WriterContext
 from mdcast.writers.generator import generator_values
 from mdcast.writers.images import (
@@ -33,15 +34,7 @@ NEUTRAL = {
 }
 
 
-def _role(element: str) -> str:
-    if element.startswith("heading"):
-        return "heading"
-    return "code" if element == "code" else "body"
-
-
-def _color(value: Any) -> str | None:
-    color = normalize_color(value)
-    return None if color is None else f"#{color}"
+_color = hex_color  # the import of an mdcast hwpx derives colours the same way (templates/hwpx_looks)
 
 
 def _look(values: dict[str, Any], family: Any, neutral: bool, family_hangul: Any = None) -> hwpx.Look:
@@ -137,14 +130,13 @@ def _table_look(values: dict[str, Any]) -> hwpx.TableLook:
 
 def _settings(ctx: WriterContext, custom: bool) -> hwpx.Settings:
     config = ctx.template.config
-    values = ctx.template.explicit if custom else config
+    values = look_values(ctx.template, custom)
     elements = values.get("elements") or {}
-    fonts = values.get("fonts") or {}
-    body_family = (fonts.get("body") or {}).get("family")
+    body_family = family(values, "body")
     looks = {
         element: _look(
             elements.get(element) or {},
-            (fonts.get(_role(element)) or {}).get("family"),
+            family(values, element),
             not custom,
             # Hangul text in code: the body face, as Word shows it (a Latin code face has no Hangul)
             body_family if element == "code" else None,

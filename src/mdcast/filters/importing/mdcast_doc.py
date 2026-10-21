@@ -11,8 +11,9 @@ from mdcast.counters import format_counter
 from mdcast.filters import pagebreak as export_pagebreak
 from mdcast.filters._raw import raw_block
 from mdcast.filters.importing.context import ImportContext
-from mdcast.readers.hwpx.body import HINT_CLASS
-from mdcast.templates import resolve_template
+from mdcast.readers.imported import HINT_CLASS
+from mdcast.templates import ResolvedTemplate, resolve_template
+from mdcast.templates.hwpx_looks import custom_container, family, hex_color, look_values
 
 
 def _plain(inlines: list[pf.Inline]) -> str:
@@ -199,26 +200,31 @@ def _hints(block: pf.Element) -> list[pf.Span]:
     return found
 
 
-def _colour(value: Any) -> str:
-    return str(value or "").upper()
-
-
-def _take_hints(doc: pf.Doc, config: dict[str, Any]) -> None:
+def _take_hints(doc: pf.Doc, tpl: ResolvedTemplate) -> None:
     """hwpx: the writer's code, code block and quote marks back as Code, CodeBlock, BlockQuote (R17).
 
     The hwpx reader keeps, for mdcast documents only, each run's Latin font and colour and its
     paragraph's background as a hint span. The writer sets inline code (and math) in the
     template's code font, a code block also on the code background, and a quote in the quote
-    colour; matching them here against the template keeps the reader template-free. Every hint
+    colour; matching them here against the template keeps the reader template-free. The
+    expected values come from ``templates/hwpx_looks`` as the writer takes them: only what the
+    template wrote itself in a custom ``reference.hwpx``, colours as ``#RRGGBB``. Every hint
     span is gone afterwards: the unmatched ones are unwrapped.
     """
-    fonts, elements = config["fonts"], config["elements"]
-    code_font = str((fonts.get("code") or {}).get("family") or "")
-    if code_font == str((fonts.get("body") or {}).get("family") or ""):
-        code_font = ""  # nothing sets code apart
-    code_fill = _colour((elements.get("code") or {}).get("background"))
-    quote = _colour((elements.get("quote") or {}).get("color"))
-    if quote == _colour((elements.get("body") or {}).get("color") or "#000000"):
+    custom = custom_container(tpl)
+    values = look_values(tpl, custom)
+    elements = values.get("elements") or {}
+
+    def colour(element: str, key: str) -> str:
+        return hex_color((elements.get(element) or {}).get(key)) or ""
+
+    code_font = family(values, "code") or ""
+    if code_font == (family(values, "body") or ""):
+        code_font = ""  # nothing sets code apart (or a custom container's own face: unknown here)
+    code_fill = colour("code", "background")
+    quote = colour("quote", "color")
+    # an unset body colour is black in the built-in container (the writer's NEUTRAL), unknown in a custom one
+    if quote == (colour("body", "color") or ("" if custom else "#000000")):
         quote = ""
 
     def is_code(span: pf.Span) -> bool:
@@ -345,7 +351,7 @@ def apply(doc: pf.Doc, ctx: ImportContext) -> pf.Doc:
     tpl = resolve_template(name, cwd=ctx.cwd, home=ctx.home, report=ctx.report)
     if name:
         ctx.frontmatter["template"] = name
-    _take_hints(doc, tpl.config)
+    _take_hints(doc, tpl)
     _attach_figure_captions(doc, tpl.config)
     _reverse_inline_state(doc, tpl.config, ctx)
     _drop_rule_breaks(doc, tpl.config, ctx)

@@ -5,7 +5,7 @@ from pathlib import Path
 import panflute as pf
 import pytest
 from docx_builder import strip_mdcast_metadata
-from helpers import export, tiny_png, write_template
+from helpers import builtin_hwpx, export, tiny_png, write_template
 
 from mdcast.filters.importing import ImportContext, run_import_filters
 from mdcast.readers.docx import read_docx
@@ -255,3 +255,24 @@ def test_hwpx_marks_are_not_read_without_mdcast_metadata(tmp_path):
     for cls in (pf.Span, pf.Code, pf.CodeBlock, pf.BlockQuote, pf.HorizontalRule):
         assert not blocks(doc, cls), cls.__name__
     assert "인라인 코드" in pf.stringify(doc) and "A-->B" in pf.stringify(doc)
+
+
+@pytest.mark.parametrize(("background", "color"), [("f6f8fa", "'#555'"), ("'#abc'", "336699")])
+def test_hwpx_marks_match_colours_written_short_or_without_hash(tmp_path, background, color):
+    # the writer normalises template colours (#RGB, no #) to #RRGGBB; matching must do the same
+    yaml_text = f"name: colours\nelements:\n  code: {{background: {background}}}\n  quote: {{color: {color}}}\n"
+    write_template(tmp_path / ".mdcast" / "templates", "colours", yaml_text)
+    doc, _ = hwpx_back(tmp_path, "```\n줄 하나\n줄 둘\n```\n\n> 인용\n", "colours")
+    assert [type(b).__name__ for b in doc.content] == ["CodeBlock", "BlockQuote"]
+    assert doc.content[0].text == "줄 하나\n줄 둘"
+
+
+def test_hwpx_marks_in_a_custom_container_follow_only_what_the_template_wrote(tmp_path):
+    # a custom reference.hwpx takes only the template's own values: an explicit code font but no
+    # explicit code background writes the code block with no fill, which must still read back
+    yaml_text = "name: own\nfonts:\n  code: {family: D2Coding}\n"
+    write_template(tmp_path / ".mdcast" / "templates", "own", yaml_text, {"reference.hwpx": builtin_hwpx()})
+    doc, _ = hwpx_back(tmp_path, "글 `코드`\n\n```\n줄 하나\n줄 둘\n```\n", "own")
+    assert [c.text for c in blocks(doc, pf.Code)] == ["코드"]
+    assert [b.text for b in blocks(doc, pf.CodeBlock)] == ["줄 하나\n줄 둘"]
+    assert not blocks(doc, pf.Span)

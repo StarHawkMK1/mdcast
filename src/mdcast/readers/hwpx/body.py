@@ -14,6 +14,7 @@ from mdcast.readers.hwpx import objects
 from mdcast.readers.hwpx.marks import accept_deletions, click_here_guide, hyperlink_url, own
 from mdcast.readers.hwpx.package import HP, CharStyle, HwpxPackage, ParaLook, ParaStyle
 from mdcast.readers.hwpx.tables import read_table
+from mdcast.readers.imported import HINT_CLASS
 from mdcast.readers.media import SMALL_IMAGE_INCHES, Assets
 from mdcast.readers.symbols import map_symbols
 from mdcast.report import Codes, Report
@@ -140,7 +141,6 @@ class Hint:
     fill: str
 
 
-HINT_CLASS = "mdcast-hwpx"
 
 
 def _hint_span(core: list[pf.Inline], hint: Hint, raw: str) -> pf.Span:
