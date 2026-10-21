@@ -20,5 +20,6 @@ def read_hwpx(source: Source, report: Report, assets_dir: str) -> ImportedDocume
     doc = pf.Doc(*reader.blocks())
     warn_image_text(doc, report, reader.is_small)
     reader.report_skipped()
+    reader.report_symbols()
     frontmatter = {k: v for k, v in (("title", pkg.title), ("author", pkg.creator)) if v}
     return ImportedDocument(doc, reader.source_text, frontmatter, assets.media, pkg.generator)

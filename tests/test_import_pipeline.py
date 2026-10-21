@@ -337,3 +337,28 @@ def test_asset_links_work_with_space_in_file_name(tmp_path, monkeypatch):
     exported = convert(Source(md, "평가 항목.md", Format.MD, base_dir=tmp_path), [Format.DOCX])
     assert exported.outputs[0].data is not None
     assert not [e for e in exported.report.events if e.code == Codes.IMAGE_FETCH_FAILED]
+
+
+def test_wingdings_bullets_in_cell_become_list_items_by_m3a_rules():
+    rows = [
+        [cell(p(run(h)), col=c, row=0, header=True) for c, h in enumerate(("구분", "목록", "외톨이"))],
+        [
+            cell(p(run("항목")), col=0, row=1),
+            cell(p(run("\uf0a7 가")), p(run("\uf0a7 나")), col=1, row=1),
+            cell(p(run("\uf0a7 혼자")), col=2, row=1),
+        ],
+    ]
+    data = hwpx_bytes(p(tbl(rows, cols=3)))
+    result = convert(Source(data, "a.hwpx", Format.HWPX), [Format.MD])
+    assert result.report.coverage == 1.0
+    mapped = [e for e in result.report.events if e.code == Codes.IMPORT_SYMBOL_MAPPED]
+    assert [(e.level, e.message) for e in mapped] == [
+        (Level.INFO, "기호 글꼴 글자 3개를 보이는 기호로 바꿨습니다")
+    ]
+    back = read_md(Source(result.outputs[0].data, "a.md", Format.MD), Report("a.md", Format.MD)).doc.content
+    assert [type(b).__name__ for b in back] == ["Table"]
+    body = back[0].content[0].content[0].content
+    listed, alone = body[1].content, body[2].content
+    assert [type(b).__name__ for b in listed] == ["BulletList"]
+    assert [pf.stringify(item).strip() for item in listed[0].content] == ["가", "나"]
+    assert [(type(b).__name__, pf.stringify(b).strip()) for b in alone] == [("Plain", "\u25aa 혼자")]

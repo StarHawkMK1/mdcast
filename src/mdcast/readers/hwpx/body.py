@@ -14,6 +14,7 @@ from mdcast.readers.hwpx.marks import accept_deletions, click_here_guide, hyperl
 from mdcast.readers.hwpx.package import HP, CharStyle, HwpxPackage, ParaStyle
 from mdcast.readers.hwpx.tables import read_table
 from mdcast.readers.media import SMALL_IMAGE_INCHES, Assets
+from mdcast.readers.symbols import map_symbols
 from mdcast.report import Codes, Report
 
 _PLAIN = CharStyle()
@@ -48,6 +49,9 @@ _SKIPPED = (
     hp("deleteBegin"),
 )
 _SKIPPED_MESSAGE = "머리말·꼬리말·메모는 가져오지 않습니다"
+_SYMBOLS_MESSAGE = "기호 글꼴 글자 {}개를 보이는 기호로 바꿨습니다"
+_SYMBOLS_LEFT = " (바꾸지 못한 글자 {}개는 그대로 둡니다)"
+_SYMBOLS_ONLY_LEFT = "기호 글꼴 글자 {}개는 보이는 기호로 바꾸지 못해 그대로 둡니다"
 
 
 def _in_body(p: etree._Element) -> bool:
@@ -372,6 +376,14 @@ class BodyReader:
             if next(section.iter(hp("deleteBegin")), None) is not None:
                 for paragraphs in (section, *section.iter(_SUB)):
                     accept_deletions(list(paragraphs.iterchildren(_P)))
+        # symbol-font characters become visible symbols in the XML itself, so the body and the
+        # source text below both read the mapped text and coverage is not affected (spec §4.6)
+        self.symbols_mapped = self.symbols_left = 0
+        for section in pkg.sections:
+            for t in section.iter(_T):
+                p = next(t.iterancestors(_P), None)
+                if p is not None and _in_body(p):
+                    self._map_symbols(t)
         # every paragraph's own text (split around its tables), nested ones (table cells, notes) as
         # their own entries, page headers, footers and memos left out; it is taken from the XML,
         # not from what this reader makes, so the coverage check sees what it drops
@@ -388,6 +400,30 @@ class BodyReader:
             for section in pkg.sections
             for e in section.iter(*_SKIPPED, _FIELD_BEGIN)
         )
+
+    def _map_symbols(self, t: etree._Element) -> None:
+        """Map an ``hp:t``'s text: its own, and its marks' text and tails (not ``t``'s own tail)."""
+        for e in t.iter():
+            for attr in ("text", "tail") if e is not t else ("text",):
+                value = getattr(e, attr)
+                if value:
+                    mapped, count, left = map_symbols(value)
+                    if count:
+                        setattr(e, attr, mapped)
+                    self.symbols_mapped += count
+                    self.symbols_left += left
+
+    def report_symbols(self) -> None:
+        """One info when the body has symbol-font characters, mapped or left as they are."""
+        if self.symbols_mapped:
+            message = _SYMBOLS_MESSAGE.format(self.symbols_mapped)
+            if self.symbols_left:
+                message += _SYMBOLS_LEFT.format(self.symbols_left)
+        elif self.symbols_left:
+            message = _SYMBOLS_ONLY_LEFT.format(self.symbols_left)
+        else:
+            return
+        self.report.info(Codes.IMPORT_SYMBOL_MAPPED, message)
 
     def report_skipped(self) -> None:
         """One info when the document has page headers or footers, memos or tracked changes."""

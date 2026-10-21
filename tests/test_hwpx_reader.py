@@ -1058,3 +1058,52 @@ def test_chart_is_skipped_with_warn():
     assert imported.source_text == ["앞", "뒤"]
     skips = events(report, "IMPORT_OBJECT_SKIPPED")
     assert [(e.level.value, e.message) for e in skips] == [("warn", "글로 옮길 수 없는 개체를 건너뜁니다")] * 3
+
+
+def test_map_symbols_counts_mapped_and_unknown():
+    from mdcast.readers.symbols import SYMBOLS, map_symbols
+
+    assert SYMBOLS["\uf0a7"] == "\u25aa" and SYMBOLS["\uf0b7"] == "\u2022"
+    assert SYMBOLS["\uf06c"] == "\u25cf" and SYMBOLS["\uf0a8"] == "\u25c6"
+    assert map_symbols("\uf0a7 가 \uf0b7\ue000\uf8ff") == ("\u25aa 가 \u2022\ue000\uf8ff", 2, 2)
+    assert map_symbols("보통 글 \ud7a3") == ("보통 글 \ud7a3", 0, 0)
+    assert map_symbols("") == ("", 0, 0)
+
+
+def test_symbol_font_text_is_mapped_in_body_notes_and_source_text():
+    tab = '<hp:run charPrIDRef="0"><hp:t>\uf0b7<hp:tab/>\uf06c 나\ue000</hp:t></hp:run>'
+    in_note = p(run("\uf0a8 주"))
+    note = (
+        '<hp:run charPrIDRef="0"><hp:ctrl><hp:footNote number="1" suffixChar="41" instId="1">'
+        '<hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP">'
+        f"{in_note}</hp:subList></hp:footNote></hp:ctrl></hp:run>"
+    )
+    imported, report = _read(p(run("\uf0a7 가")), p(tab, note))
+    body = [text(b) for b in imported.doc.content]
+    assert body == ["\u25aa 가", "\u2022 \u25cf 나\ue000\u25c6 주"]  # the note text comes last
+    notes = []
+    imported.doc.walk(lambda e, _d: notes.append(e) if isinstance(e, pf.Note) else None)
+    assert [text(n) for n in notes] == ["\u25c6 주"]
+    assert imported.source_text == ["\u25aa 가", "\u2022\u25cf 나\ue000", "\u25c6 주"]
+    infos = events(report, "IMPORT_SYMBOL_MAPPED")
+    assert [(e.level.value, e.message) for e in infos] == [
+        ("info", "기호 글꼴 글자 4개를 보이는 기호로 바꿨습니다 (바꾸지 못한 글자 1개는 그대로 둡니다)")
+    ]
+
+
+def test_symbol_report_only_when_symbol_font_text_is_there():
+    _, report = read(p(run("보통 글")))
+    assert events(report, "IMPORT_SYMBOL_MAPPED") == []
+    _, report = read(p(run("\ue000 글")))
+    assert [e.message for e in events(report, "IMPORT_SYMBOL_MAPPED")] == [
+        "기호 글꼴 글자 1개는 보이는 기호로 바꾸지 못해 그대로 둡니다"
+    ]
+
+
+def test_symbol_font_text_in_a_text_box_is_mapped():
+    imported, report = _read(p(run("앞"), textbox(p(run("\uf0d8 상자"))), run("\uf0fc 뒤")))
+    assert [text(b) for b in imported.doc.content] == ["앞", "\u27a2 상자", "\u2713 뒤"]
+    assert imported.source_text == ["앞", "\u2713 뒤", "\u27a2 상자"]  # nested paragraphs after
+    assert [e.message for e in events(report, "IMPORT_SYMBOL_MAPPED")] == [
+        "기호 글꼴 글자 2개를 보이는 기호로 바꿨습니다"
+    ]
