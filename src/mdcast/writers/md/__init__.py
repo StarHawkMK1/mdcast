@@ -20,6 +20,9 @@ FRONTMATTER_KEYS = ("title", "author", "template")
 _SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]+:")  # as read_md: a drive letter is not a scheme
 # characters that end or break a link destination; % first so the codes are not encoded again
 _PATH_CODES = (("%", "%25"), (" ", "%20"), ("(", "%28"), (")", "%29"), ("<", "%3C"), (">", "%3E"))
+# a line starting with ``:`` or ``~`` and a space is a definition in pandoc's markdown (read_md):
+# the line before it would become the term
+_DEFINITION_MARK = re.compile(r"[:~](?=\s|$)")
 
 
 def _convert(doc: pf.Doc) -> str:
@@ -89,6 +92,48 @@ def _prepare(elem: pf.Element, _doc: pf.Doc):
     return None
 
 
+def _escape_line_starts(inlines: pf.ListContainer, at_start: bool) -> bool:
+    """Escape a definition mark a line starts with; returns whether the next inline starts a line.
+
+    Text in an inline that opens with a mark of its own (``**``, ``[``, ``<sup>``, …) is not at the
+    start of a line; a Span without attributes is written as its bare content. A note's paragraphs
+    are blocks of their own (walked by :func:`_line_starts`).
+    """
+    out: list[pf.Inline] = []
+    for elem in inlines:
+        if isinstance(elem, pf.LineBreak):
+            at_start = True
+        elif isinstance(elem, (pf.Space, pf.SoftBreak)):
+            pass
+        elif isinstance(elem, pf.Str) and at_start and _DEFINITION_MARK.match(elem.text):
+            out.append(pf.RawInline("\\" + elem.text[0], "gfm"))
+            elem.text = elem.text[1:]
+            at_start = False
+            if not elem.text:
+                continue
+        elif isinstance(elem, pf.Span):
+            at_start = _escape_line_starts(elem.content, at_start)
+        else:
+            if not isinstance(elem, pf.Note) and isinstance(getattr(elem, "content", None), pf.ListContainer):
+                _escape_line_starts(elem.content, False)
+            at_start = False
+        out.append(elem)
+    inlines[:] = out
+    return at_start
+
+
+def _line_starts(elem: pf.Element, _doc: pf.Doc):
+    """Keep every block's lines what they are when read back (R7).
+
+    A heading is one ATX line, so a hard break in it is written as a space; a paragraph line that
+    starts with a definition mark gets the mark escaped.
+    """
+    if isinstance(elem, pf.Header):
+        elem.walk(lambda e, d: pf.Space() if isinstance(e, pf.LineBreak) else None)
+    elif isinstance(elem, (pf.Para, pf.Plain)):
+        _escape_line_starts(elem.content, True)
+
+
 def write_md(doc: pf.Doc, frontmatter: dict[str, Any]) -> str:
     doc = clone(doc)
     cell_notes: list[pf.Note] = []
@@ -113,6 +158,10 @@ def write_md(doc: pf.Doc, frontmatter: dict[str, Any]) -> str:
 
     doc = doc.walk(_prepare)
     doc = doc.walk(action, stop_if=lambda e: isinstance(e, pf.Table))
+    # after the tables became raw HTML: a raw gfm escape inside an HTML cell would be dropped
+    doc = doc.walk(_line_starts)
+    for note in cell_notes:  # written as markdown after the body
+        note.walk(_line_starts)
     html_cells.render()
     pipe_cells.render()
     doc = doc.walk(fill)

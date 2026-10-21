@@ -419,3 +419,60 @@ def test_html_table_alignment_survives_a_spanning_first_row():
     got = tables(back(md))[0]
     assert aligns(got) == ["AlignCenter", "AlignRight"]
     assert cell_aligns(got) == [["AlignDefault"], ["AlignDefault"] * 2]
+
+
+def kinds(doc: pf.Doc) -> list[str]:
+    return [type(b).__name__ for b in doc.content]
+
+
+def colon_line(*before: pf.Inline) -> pf.Para:
+    return pf.Para(*before, pf.LineBreak(), pf.Str(":"), pf.Space(), pf.Str("b"))
+
+
+def test_line_starting_with_colon_after_hard_break_stays_text():
+    r"""``a\`` then ``: b`` would read back as a definition list (term + definition)."""
+    cases = [
+        doc_with(colon_line(pf.Str("a"))),
+        doc_with(pf.Para(pf.Str("a")), pf.Para(pf.Str(":"), pf.Space(), pf.Str("b"))),
+        doc_with(pf.Para(pf.Str("a"), pf.LineBreak(), pf.Str("~"), pf.Space(), pf.Str("b"))),
+        doc_with(pf.Para(pf.Strong(pf.Str("a"), pf.LineBreak(), pf.Str(":"), pf.Space(), pf.Str("b")))),
+        doc_with(pf.BulletList(pf.ListItem(pf.Plain(pf.Str("a"), pf.LineBreak(), pf.Str(":"), pf.Space(), pf.Str("b"))))),
+        doc_with(pf.Para(pf.Str("x")), pf.BlockQuote(pf.Para(pf.Str("a")), pf.Para(pf.Str(":"), pf.Space(), pf.Str("b")))),
+    ]
+    for doc in cases:
+        md = write_md(doc, {})
+        again = back(md)
+        assert kinds(again) == kinds(doc), md
+        assert pf.stringify(again) == pf.stringify(doc), md
+        assert first_or_none(again, pf.DefinitionList) is None, md
+        assert "\\: b" in md or "\\~ b" in md, md
+
+
+def first_or_none(doc: pf.Doc, kind):
+    found: list = []
+    doc.walk(lambda e, d: found.append(e) if isinstance(e, kind) else None)
+    return found[0] if found else None
+
+
+def test_colon_inside_a_line_is_not_escaped():
+    md = write_md(doc_with(pf.Para(pf.Str("a:"), pf.Space(), pf.Str("b"), pf.LineBreak(), pf.Str(":b"))), {})
+    assert r"\:" not in md
+
+
+def test_colon_line_in_a_cell_note_stays_text():
+    note = pf.Note(pf.Para(pf.Str("n")), pf.Para(pf.Str(":"), pf.Space(), pf.Str("m")))
+    doc = doc_with(make_table([[cell(txt("h")), cell(txt("i"))]], [[cell(pf.Plain(pf.Str("v"), note), colspan=2)]]))
+    again = back(write_md(doc, {}))
+    assert first_or_none(again, pf.DefinitionList) is None
+    assert [type(b).__name__ for b in first(again, pf.Note).content] == ["Para", "Para"]
+
+
+def test_hard_break_in_heading_is_written_as_space():
+    """An ATX heading is one line: a hard break would end it and push the rest into a paragraph."""
+    doc = doc_with(
+        pf.Header(pf.Strong(pf.Str("a")), pf.LineBreak(), pf.Str(":"), pf.Space(), pf.Str("b"), level=3),
+        pf.Para(pf.Str("c")),
+    )
+    again = back(write_md(doc, {}))
+    assert kinds(again) == ["Header", "Para"]
+    assert pf.stringify(again.content[0]) == "a : b"
