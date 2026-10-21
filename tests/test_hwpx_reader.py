@@ -6,7 +6,8 @@ from xml.sax.saxutils import escape, quoteattr
 
 import panflute as pf
 import pytest
-from hwpx_builder import cell, hwpx_bytes, p, run, tbl
+from helpers import tiny_bmp, tiny_png
+from hwpx_builder import cell, hwpx_bytes, p, pic, run, tbl, textbox
 from lxml import etree
 
 from mdcast.ast import grid_cells
@@ -858,3 +859,202 @@ def test_tracked_deletion_across_paragraphs_is_left_out():
     assert imported.source_text == ["첫 글 ", " 남은 글", "칸 앞", "칸 뒤"]
     result = convert(Source(hwpx_bytes("".join(body)), "a.hwpx", Format.HWPX), [Format.MD])
     assert result.report.coverage == 1.0
+
+
+# pictures, text boxes and shapes (Task 6) -------------------------------------------------------
+
+_AUTO = "그림입니다.\n원본 그림의 이름: x.png\n원본 그림의 크기: 가로 10pixel, 세로 10pixel"
+_IMAGE_TEXT = "표 칸 안의 작은 그림은 글자였는지 알 수 없어 그림으로 가져옵니다"  # the docx reader's message
+
+
+def to_md(*sections: str, name: str = "a.hwpx", **kw):
+    result = convert(Source(hwpx_bytes(*sections, **kw), name, Format.HWPX), [Format.MD])
+    return result.outputs[0].data.decode(), result
+
+
+def bare(run_xml: str) -> str:
+    """The object a builder run holds, without its run."""
+    return run_xml.removeprefix('<hp:run charPrIDRef="0">').removesuffix("</hp:run>")
+
+
+def container(*objects: str) -> str:
+    return (
+        '<hp:run charPrIDRef="0"><hp:container id="1" zOrder="0" numberingType="PICTURE">'
+        f"{''.join(objects)}</hp:container></hp:run>"
+    )
+
+
+def events(report: Report, code: str) -> list:
+    return [e for e in report.events if e.code == code]
+
+
+def test_picture_goes_to_assets_with_auto_comment_replaced():
+    md, out = to_md(p(pic("image1", comment=_AUTO)), bin_data={"image1.png": tiny_png()})
+    assert "![그림](a_assets/image1.png)" in md and "x.png" not in md
+    assert out.outputs[0].assets == {"a_assets/image1.png": tiny_png()}
+    # Hancom also writes the drawing program's name on a line of its own, with a space before ':'
+    program = _AUTO + "\n프로그램 이름 : 그리기 도구"
+    md, _ = to_md(p(pic("image1", comment=program)), bin_data={"image1.png": tiny_png()})
+    assert "![그림](a_assets/image1.png)" in md and "그리기" not in md
+
+
+def test_human_comment_is_alt_text():
+    imported, _ = _read(
+        p(pic("image1", comment="회사\n로고")),
+        p(pic("image1")),
+        p(pic("image1", comment="그림입니다.\n사람이 쓴 설명")),
+        bin_data={"image1.png": tiny_png()},
+    )
+    images = [b.content[0] for b in imported.doc.content]
+    assert [text(i) for i in images] == ["회사 로고", "그림", "그림입니다. 사람이 쓴 설명"]
+    assert {i.url for i in images} == {"a_assets/image1.png"} and imported.media == {"image1.png": tiny_png()}
+    assert all(not i.attributes for i in images)
+
+
+def test_small_picture_in_cell_without_comment_warns_image_text():
+    row = [
+        cell(p(pic("image1", height=3600)), col=0, row=0),
+        cell(p(pic("image1", comment="확인 표시", height=3600)), col=1, row=0),
+        cell(p(pic("image1", comment=_AUTO, height=3601)), col=2, row=0),
+    ]
+    second = [cell(p(run("글")), col=0, row=0), cell(p(pic("image1", comment=_AUTO, height=1000)), col=1, row=0)]
+    imported, report = _read(
+        p(pic("image1", height=100)),  # outside a table: no warn
+        p(tbl([row], cols=3)),
+        p(tbl([second], cols=2)),
+        bin_data={"image1.png": tiny_png()},
+    )
+    warns = events(report, "IMPORT_IMAGE_TEXT")
+    assert [(e.level.value, e.message) for e in warns] == [("warn", _IMAGE_TEXT)] * 2
+    # the docx reader's place keys: tables in document order, row and column from 1
+    assert [e.where for e in warns] == [{"table": 1, "row": 1, "col": 1}, {"table": 2, "row": 1, "col": 2}]
+    in_cell = imported.doc.content[1].head.content[0].content[0].content
+    assert kinds(in_cell) == ["Plain"] and kinds(in_cell[0].content) == ["Image"]
+
+
+def test_bmp_picture_becomes_png():
+    imported, report = _read(p(pic("image1")), bin_data={"image1.bmp": tiny_bmp()})
+    assert list(imported.media) == ["image1.png"] and imported.media["image1.png"].startswith(b"\x89PNG")
+    assert imported.doc.content[0].content[0].url == "a_assets/image1.png"
+    assert not events(report, "IMAGE_CONVERT_FAILED")
+
+
+def test_unreadable_or_missing_picture_data_keeps_going():
+    imported, report = _read(
+        p(run("앞 "), pic("image1"), run(" 뒤")),  # bytes Pillow cannot read: kept as they are
+        p(run("없는 "), pic("image9", comment="조직도")),  # no such item: the human alt text stays
+        p(pic("image9", comment=_AUTO)),  # nothing to keep
+        bin_data={"image1.bmp": b"not a picture"},
+    )
+    assert imported.media == {"image1.bmp": b"not a picture"}
+    assert [e.where for e in events(report, "IMAGE_CONVERT_FAILED")] == [{"name": "image1.bmp"}]
+    assert kinds(imported.doc.content) == ["Para", "Para"]
+    assert kinds(imported.doc.content[0].content) == ["Str", "Space", "Image", "Space", "Str"]
+    assert text(imported.doc.content[1]) == "없는 조직도"
+    skips = events(report, "IMPORT_OBJECT_SKIPPED")
+    assert [(e.level.value, e.message, e.where) for e in skips] == [
+        ("warn", "그림 파일을 찾을 수 없어 그림을 건너뜁니다", {"name": "image9"})
+    ] * 2
+
+
+def test_same_picture_twice_is_one_file():
+    imported, _ = _read(
+        p(pic("image1"), pic("image1")),
+        p(pic("image2")),
+        bin_data={"image1.png": tiny_png(), "image2.png": tiny_png()},
+    )
+    assert imported.media == {"image1.png": tiny_png(), "image2.png": tiny_png()}
+    assert [i.url for i in imported.doc.content[0].content if isinstance(i, pf.Image)] == ["a_assets/image1.png"] * 2
+
+
+def test_textbox_text_is_paragraphs_in_place_and_counted():
+    imported, _ = _read(p(run("앞글"), textbox(p(run("상자 안")), p(run("둘째 줄"), para="1")), run("뒷글")))
+    blocks = imported.doc.content
+    # a text box's paragraphs follow body rules, but never become headings (as in a note)
+    assert kinds(blocks) == ["Para", "Para", "Para", "Para"]
+    assert [text(b) for b in blocks] == ["앞글", "상자 안", "둘째 줄", "뒷글"]
+    # each text box paragraph once, on its own
+    assert imported.source_text == ["앞글", "뒷글", "상자 안", "둘째 줄"]
+    md, result = to_md(p(run("앞글"), textbox(p(run("상자 안"))), run("뒷글")))
+    assert md.split() == ["앞글", "상자", "안", "뒷글"] and result.report.coverage == 1.0
+
+
+def test_container_objects_are_read_in_order():
+    inner = container(bare(textbox(p(run("안쪽 상자")))))
+    group = container(bare(pic("image1")), bare(textbox(p(run("상자 하나")))), bare(inner))
+    imported, _ = _read(p(run("앞"), group, run("뒤")), bin_data={"image1.png": tiny_png()})
+    blocks = imported.doc.content
+    assert [text(b) for b in blocks] == ["앞", "그림", "상자 하나", "안쪽 상자", "뒤"]
+    assert kinds(blocks[1].content) == ["Image"]
+    assert imported.source_text == ["앞", "뒤", "상자 하나", "안쪽 상자"]
+
+
+def test_every_drawing_with_text_gives_its_text():
+    def shape(tag: str) -> str:
+        return textbox(p(run(f"{tag} 글"))).replace("hp:rect", f"hp:{tag}")
+
+    tags = ["ellipse", "polygon", "arc", "curve", "connectLine", "unknownShape"]
+    imported, report = _read(p(*(shape(tag) for tag in tags)))
+    assert [text(b) for b in imported.doc.content] == [f"{tag} 글" for tag in tags]
+    assert not events(report, "IMPORT_OBJECT_SKIPPED")
+
+
+def test_textbox_in_cell_and_note():
+    alone = cell(p(textbox(p(run("상자만")))), col=0, row=0)
+    mixed = cell(p(run("칸 앞"), textbox(p(run("칸 상자"))), run("칸 뒤")), col=1, row=0)
+    imported, _ = _read(p(tbl([[alone, mixed]], cols=2)), p(run("주"), note(p(textbox(p(run("주 상자")))))))
+    cells = imported.doc.content[0].head.content[0].content
+    assert kinds(cells[0].content) == ["Plain"] and text(cells[0]) == "상자만"
+    # with the box's paragraph the cell has three: each is a Para (R3)
+    assert kinds(cells[1].content) == ["Para", "Para", "Para"]
+    assert [text(b) for b in cells[1].content] == ["칸 앞", "칸 상자", "칸 뒤"]
+    footnote = imported.doc.content[1].content[1]
+    assert kinds(footnote.content) == ["Para"] and text(footnote) == "주 상자"
+
+
+def test_textboxes_survive_md_round_trip():
+    alone = cell(p(textbox(p(run("상자만")))), col=0, row=0)
+    mixed = cell(p(run("칸 앞"), textbox(p(run("칸 상자"))), run("칸 뒤")), col=1, row=0)
+    data = hwpx_bytes(
+        p(run("앞글"), textbox(p(run("상자 가"), para="3"), p(run("상자 나"), para="3")), run("뒷글")),
+        p(tbl([[alone, mixed]], cols=2)),
+    )
+    source = read_hwpx(Source(data, "a.hwpx", Format.HWPX), Report("a.hwpx", Format.HWPX), "a_assets").doc
+    result = convert(Source(data, "a.hwpx", Format.HWPX), [Format.MD])
+    assert result.report.coverage == 1.0
+    back = read_md(Source(result.outputs[0].data, "a.md", Format.MD), Report("a.md", Format.MD)).doc
+    assert _shape(back.content) == _shape(source.content)
+    assert [k for k, *_ in _shape(source.content)] == ["Para", "OrderedList", "Para", "Table"]
+
+
+def test_picture_caption_is_kept_after_the_picture():
+    caption = (
+        f'<hp:caption side="BOTTOM" fullSz="0" width="7200" gap="850" lastWidth="7200">{_SUB_OPEN}'
+        f"{p(run('그림 설명'))}</hp:subList></hp:caption>"
+    )
+    captioned = pic("image1").replace("<hp:outMargin", caption + "<hp:outMargin")
+    imported, _ = _read(p(run("앞 "), captioned, run(" 뒤")), bin_data={"image1.png": tiny_png()})
+    assert [text(b) for b in imported.doc.content] == ["앞 그림", "그림 설명", "뒤"]
+    assert imported.source_text == ["앞 ", " 뒤", "그림 설명"]
+
+
+def _object(tag: str, comment: str | None) -> str:
+    shape_comment = "" if comment is None else f"<hp:shapeComment>{escape(comment)}</hp:shapeComment>"
+    return (
+        f'<hp:run charPrIDRef="0"><hp:{tag} id="1" zOrder="0"><hp:sz width="1" height="1"/>'
+        f"{shape_comment}</hp:{tag}></hp:run>"
+    )
+
+
+def test_chart_is_skipped_with_warn():
+    imported, report = _read(
+        p(run("앞"), _object("chart", None), run("뒤")),
+        p(_object("ole", "매출 추이")),  # a comment that is not Hancom's picture template stays
+        p(_object("textart", "")),
+    )
+    # nothing is put where an object without a description was: the text around it closes up
+    assert kinds(imported.doc.content) == ["Para", "Para"]
+    assert [text(b) for b in imported.doc.content] == ["앞뒤", "매출 추이"]
+    assert imported.source_text == ["앞", "뒤"]
+    skips = events(report, "IMPORT_OBJECT_SKIPPED")
+    assert [(e.level.value, e.message) for e in skips] == [("warn", "글로 옮길 수 없는 개체를 건너뜁니다")] * 3

@@ -187,3 +187,50 @@ def hwpx_bytes(
             package.writestr(f"BinData/{name}", blob)
         package.writestr("META-INF/manifest.xml", _manifest(len(sections), encrypted))
     return out.getvalue()
+
+
+def _shape_frame(height: int) -> str:
+    """The size and place elements every drawing object starts with."""
+    return (
+        f'<hp:offset x="0" y="0"/><hp:orgSz width="7200" height="{height}"/>'
+        f'<hp:curSz width="7200" height="{height}"/><hp:flip horizontal="0" vertical="0"/>'
+    )
+
+
+def _shape_place(height: int) -> str:
+    return (
+        f'<hp:sz width="7200" widthRelTo="ABSOLUTE" height="{height}" heightRelTo="ABSOLUTE" protect="0"/>'
+        '<hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" '
+        'vertRelTo="PARA" horzRelTo="PARA" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/>'
+        '<hp:outMargin left="0" right="0" top="0" bottom="0"/>'
+    )
+
+
+def pic(bin_id: str, *, comment: str | None = None, height: int = 7200) -> str:
+    """A run holding one picture of manifest item ``bin_id``; ``height`` is its curSz in HWPUNIT.
+
+    The ``img`` element is in the core namespace, as Hancom writes it.
+    """
+    shape_comment = "" if comment is None else f"<hp:shapeComment>{escape(comment)}</hp:shapeComment>"
+    return (
+        '<hp:run charPrIDRef="0"><hp:pic id="1" zOrder="0" numberingType="PICTURE" textWrap="TOP_AND_BOTTOM" '
+        'textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" href="" groupLevel="0" instid="1" reverse="0">'
+        f"{_shape_frame(height)}"
+        f'<hc:img binaryItemIDRef="{bin_id}" bright="0" contrast="0" effect="REAL_PIC" alpha="0"/>'
+        f"{_shape_place(height)}{shape_comment}</hp:pic></hp:run>"
+    )
+
+
+def textbox(*paras: str) -> str:
+    """A run holding a rectangle whose text (``hp:drawText``) is ``paras``."""
+    return (
+        '<hp:run charPrIDRef="0"><hp:rect id="1" zOrder="0" numberingType="PICTURE" textWrap="IN_FRONT_OF_TEXT" '
+        'textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" href="" groupLevel="0" instid="1" ratio="0">'
+        f"{_shape_frame(7200)}"
+        '<hp:drawText lastWidth="7200" name="" editable="0">'
+        '<hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP">'
+        f'{"".join(paras)}</hp:subList>'
+        '<hp:textMargin left="283" right="283" top="283" bottom="283"/></hp:drawText>'
+        '<hc:pt0 x="0" y="0"/><hc:pt1 x="7200" y="0"/><hc:pt2 x="7200" y="7200"/><hc:pt3 x="0" y="7200"/>'
+        f"{_shape_place(7200)}<hp:shapeComment>사각형입니다.</hp:shapeComment></hp:rect></hp:run>"
+    )

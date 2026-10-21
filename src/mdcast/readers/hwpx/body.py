@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 import panflute as pf
 from lxml import etree
 
 from mdcast.readers.docx_package import PAGEBREAK_SENTINEL
+from mdcast.readers.hwpx import objects
 from mdcast.readers.hwpx.marks import accept_deletions, click_here_guide, hyperlink_url, own
 from mdcast.readers.hwpx.package import HP, CharStyle, HwpxPackage, ParaStyle
 from mdcast.readers.hwpx.tables import read_table
+from mdcast.readers.media import SMALL_IMAGE_INCHES, Assets
 from mdcast.report import Codes, Report
 
 _PLAIN = CharStyle()
@@ -20,6 +22,7 @@ _MAX_HEADER = 6
 _BODY_OUTLINE = 9  # outline levels from 9 on read as body text
 _SPLIT = re.compile(r"([ \t\r\n]+)")
 _EDGE = (pf.Space, pf.LineBreak)
+_SMALL_IMAGE = SMALL_IMAGE_INCHES * 7200  # HWPUNIT
 
 
 def hp(tag: str) -> str:
@@ -55,11 +58,11 @@ def _own_texts(p: etree._Element) -> list[str]:
     """The paragraph's own ``hp:t`` text, leaving out paragraphs nested in its tables or notes.
 
     The text is split where the reader puts something that is not in it: a table (a block before
-    and after it), an equation (its script as code) and a click-here field (its guide text when
-    it is empty).
+    and after it), an equation (its script as code), a click-here field (its guide text when
+    it is empty) and a drawing object (a picture's alt text, a shape's text as blocks).
     """
     pieces: list[list[str]] = [[]]
-    for e in own(p, _T, _TBL, _EQUATION, _FIELD_BEGIN):
+    for e in own(p, _T, _TBL, _EQUATION, _FIELD_BEGIN, *objects.OBJECTS, objects.DRAW_TEXT):
         if e.tag == _T:
             pieces[-1].append("".join(e.itertext()))
         elif e.tag != _FIELD_BEGIN or e.get("type") == "CLICK_HERE":
@@ -358,10 +361,11 @@ class _Fields:
 class BodyReader:
     """Turns the paragraphs of every section into blocks, in document order."""
 
-    def __init__(self, pkg: HwpxPackage, report: Report, assets: object | None) -> None:
+    def __init__(self, pkg: HwpxPackage, report: Report, assets: Assets | None) -> None:
         self.pkg = pkg
         self.report = report
-        self.assets = assets  # Task 6 gives this its type; None until pictures are read
+        self.assets = assets  # None: pictures link to their BinData file name, nothing is written
+        self._small: dict[int, pf.Image] = {}  # pictures that may have been text (IMPORT_IMAGE_TEXT)
         # tracked changes read as accepted: deleted text leaves the XML before anything reads it
         # (paired across the paragraphs of a section, and of each cell, note or caption)
         for section in pkg.sections:
@@ -467,9 +471,79 @@ class BodyReader:
                         blocks.append(table)
                     else:  # no cells: an empty <table> would only be noise; keep a caption's text
                         blocks.extend(table.caption.content)
-                # other block objects (text boxes) will do the same: flush(), then their own blocks
+                elif objects.is_object(child):
+                    self._object(child, in_cell, fields, flush, blocks)
         flush()
         return blocks
+
+    def is_small(self, image: pf.Image) -> bool:
+        """A picture with no description of at most ``SMALL_IMAGE_INCHES`` high: it may have been text."""
+        return id(image) in self._small
+
+    def _object(
+        self,
+        obj: etree._Element,
+        in_cell: bool,
+        fields: _Fields,
+        flush: Callable[[], None],
+        blocks: list[pf.Block],
+    ) -> None:
+        """A drawing object where it stands: a picture inline, anything else as blocks.
+
+        A shape's text (a text box), each object of a group in order, the description of an
+        object that has no text, and any object's caption go in as blocks: the paragraph is
+        broken before them. They read like the paragraphs around them (a cell's are Plain and R3
+        applies to the cell as a whole), but never become a heading or leave a page-break mark.
+        """
+        if obj.tag == objects.PIC:
+            for piece in self._picture(obj):
+                fields.line.add(_PLAIN, piece)
+        elif obj.tag == objects.CONTAINER:
+            flush()
+            for child in obj:
+                if objects.is_object(child):
+                    self._object(child, in_cell, fields, flush, blocks)
+            flush()
+        elif obj.tag in objects.NO_TEXT:
+            self.report.warn(Codes.IMPORT_OBJECT_SKIPPED, "글로 옮길 수 없는 개체를 건너뜁니다")
+            text = objects.human_comment(obj)
+            if text:
+                flush()
+                blocks.append(self._block(_tokens([text]), _BODY, in_cell, top=False))
+        else:
+            flush()
+            blocks.extend(self._drawn(objects.sub_list(obj, objects.DRAW_TEXT), in_cell))
+        caption = self._drawn(objects.sub_list(obj, objects.CAPTION), in_cell)
+        if caption:
+            flush()
+            blocks.extend(caption)
+
+    def _drawn(self, sub: etree._Element | None, in_cell: bool) -> list[pf.Block]:
+        """The paragraphs of a shape's text or an object's caption."""
+        if sub is None:
+            return []
+        return self.paragraphs(sub.iterchildren(_P), in_cell=in_cell, nested=True)
+
+    def _picture(self, pic: etree._Element) -> list[str | pf.Inline]:
+        """An Image of the picture's file, its alt text the human description or ``그림``.
+
+        A picture whose file is not in the package leaves its human description as text, with a
+        warn ``IMPORT_OBJECT_SKIPPED``.
+        """
+        alt = objects.human_comment(pic)
+        ref = objects.picture_ref(pic)
+        if ref not in self.pkg.bin_data:
+            self.report.warn(
+                Codes.IMPORT_OBJECT_SKIPPED, "그림 파일을 찾을 수 없어 그림을 건너뜁니다", name=ref
+            )
+            return [alt] if alt else []
+        name, blob = self.pkg.bin_data[ref]
+        url = self.assets.add(name, blob) if self.assets is not None else name
+        image = pf.Image(*(_tokens([alt]) if alt else [pf.Str("그림")]), url=url)
+        height = objects.height(pic)
+        if not alt and height is not None and height <= _SMALL_IMAGE:
+            self._small[id(image)] = image
+        return [image]
 
     def _note(self, note: etree._Element) -> pf.Note | None:
         """A footnote or endnote; its paragraphs are Para (R1). None when it has no text."""

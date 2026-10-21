@@ -91,5 +91,5 @@ def test_coverage_is_reported_only_when_measured():
 def test_import_codes_exist():
     for name in ("IMPORT_HEADING_INFERRED", "IMPORT_LIST_INFERRED", "IMPORT_TEXT_MISSING",
                  "IMPORT_IMAGE_TEXT", "IMPORT_HEADER_SKIPPED", "IMAGE_CONVERT_FAILED", "OUTPUT_EXISTS",
-                 "HWPX_EQUATION_PRESERVED"):
+                 "HWPX_EQUATION_PRESERVED", "IMPORT_OBJECT_SKIPPED"):
         assert getattr(Codes, name) == name

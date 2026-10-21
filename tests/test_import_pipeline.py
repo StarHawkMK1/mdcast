@@ -303,3 +303,37 @@ def test_import_prints_no_pandoc_warnings(tmp_path, caplog, capfd):
     assert "[^t1]: 칸 각주" in res.outputs[0].data.decode()
     assert not [r for r in caplog.records if r.name == "pypandoc"]
     assert "[WARNING]" not in capfd.readouterr().err
+
+
+def test_asset_links_work_with_space_in_file_name(tmp_path, monkeypatch):
+    """Review Focus 3: `평가 항목.hwpx` → CLI; the links into `평가 항목_assets/` are found again."""
+    from click.testing import CliRunner
+    from helpers import tiny_bmp, tiny_png
+    from hwpx_builder import pic
+
+    from mdcast.cli import main
+
+    # a picture in body text, and one in a two-paragraph cell (written as an HTML table)
+    in_cell = cell(p(run("칸 글")), p(pic("image2")), col=0, row=0)
+    data = hwpx_bytes(
+        p(run("본문 "), pic("image1")),
+        p(tbl([[in_cell, cell(p(run("옆")), col=1, row=0)]], cols=2)),
+        bin_data={"image1.png": tiny_png(), "image2.bmp": tiny_bmp()},
+    )
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "평가 항목.hwpx").write_bytes(data)
+    r = CliRunner().invoke(main, ["convert", str(tmp_path / "평가 항목.hwpx")])
+    assert r.exit_code == 0, r.output
+    assert sorted(f.name for f in (tmp_path / "평가 항목_assets").iterdir()) == ["image1.png", "image2.png"]
+    md = (tmp_path / "평가 항목.md").read_bytes()
+    assert "<table" in md.decode()
+
+    back = read_md(Source(md, "평가 항목.md", Format.MD, base_dir=tmp_path), Report("평가 항목.md", Format.MD)).doc
+    urls: list[str] = []
+    back.walk(lambda e, _d: urls.append(e.url) if isinstance(e, pf.Image) else None)
+    assert sorted(urls) == ["평가 항목_assets/image1.png", "평가 항목_assets/image2.png"]
+    assert all((tmp_path / url).is_file() for url in urls)
+
+    exported = convert(Source(md, "평가 항목.md", Format.MD, base_dir=tmp_path), [Format.DOCX])
+    assert exported.outputs[0].data is not None
+    assert not [e for e in exported.report.events if e.code == Codes.IMAGE_FETCH_FAILED]
