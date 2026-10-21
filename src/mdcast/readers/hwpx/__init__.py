@@ -16,5 +16,6 @@ def read_hwpx(source: Source, report: Report, assets_dir: str) -> ImportedDocume
     pkg = open_hwpx(source.data)
     reader = BodyReader(pkg, report, None)
     doc = pf.Doc(*reader.blocks())
+    reader.report_skipped()
     frontmatter = {k: v for k, v in (("title", pkg.title), ("author", pkg.creator)) if v}
     return ImportedDocument(doc, reader.source_text, frontmatter, {}, pkg.generator)

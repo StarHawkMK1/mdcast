@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import zipfile
+from xml.sax.saxutils import escape, quoteattr
 
 import panflute as pf
 import pytest
@@ -647,3 +648,194 @@ def test_list_item_of_only_a_table_or_page_break_survives_md_round_trip():
     assert result.report.coverage == 1.0
     back = read_md(Source(result.outputs[0].data, "a.md", Format.MD), Report("a.md", Format.MD)).doc
     assert _shape(back.content) == _shape(source.content)
+
+
+# notes, equations, headers, memos, fields and tracked changes (Task 5) --------------------------
+
+_SKIPPED = "머리말·꼬리말·메모는 가져오지 않습니다"  # the docx reader's IMPORT_HEADER_SKIPPED message
+_SUB_OPEN = '<hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP">'
+
+
+def _ctrl(inner: str) -> str:
+    return f'<hp:run charPrIDRef="0"><hp:ctrl>{inner}</hp:ctrl></hp:run>'
+
+
+def note(*paras: str, kind: str = "footNote") -> str:
+    return _ctrl(
+        f'<hp:{kind} number="1" suffixChar="41" instId="1">{_SUB_OPEN}{"".join(paras)}</hp:subList></hp:{kind}>'
+    )
+
+
+def equation(script: str, char: str = "0") -> str:
+    return (
+        f'<hp:run charPrIDRef="{char}"><hp:equation id="1" zOrder="0" numberingType="EQUATION" '
+        'textWrap="TOP_AND_BOTTOM" version="Equation Version 60" baseLine="85" textColor="#000000" '
+        'baseUnit="1000" lineMode="CHAR" font="HYhwpEQ"><hp:sz width="1000" widthRelTo="ABSOLUTE" height="1000" '
+        'heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="1"/><hp:shapeComment>수식입니다.</hp:shapeComment>'
+        f"<hp:script>{escape(script)}</hp:script></hp:equation></hp:run>"
+    )
+
+
+def page_part(kind: str, *paras: str) -> str:
+    return _ctrl(f'<hp:{kind} id="1" applyPageType="BOTH">{_SUB_OPEN}{"".join(paras)}</hp:subList></hp:{kind}>')
+
+
+def field_begin(fid: str, kind: str, params: dict[str, str] | None = None, inner: str = "") -> str:
+    params = params or {}
+    items = "".join(
+        f"<hp:stringParam name={quoteattr(name)}>{escape(value)}</hp:stringParam>" for name, value in params.items()
+    )
+    return _ctrl(
+        f'<hp:fieldBegin id="{fid}" type="{kind}" name="" editable="1" dirty="0" zorder="-1" fieldid="1">'
+        f'<hp:parameters cnt="{len(params) + 1}" name=""><hp:integerParam name="Prop">0</hp:integerParam>{items}'
+        f"</hp:parameters>{inner}</hp:fieldBegin>"
+    )
+
+
+def field_end(fid: str) -> str:
+    return _ctrl(f'<hp:fieldEnd beginIDRef="{fid}" fieldid="1"/>')
+
+
+def t(xml: str, char: str = "0") -> str:
+    """A run whose ``hp:t`` holds ``xml`` as is (marks between the text)."""
+    return f'<hp:run charPrIDRef="{char}"><hp:t>{xml}</hp:t></hp:run>'
+
+
+def skipped(report: Report) -> list[str]:
+    return [e.message for e in report.events if e.code == "IMPORT_HEADER_SKIPPED"]
+
+
+def test_footnote_and_endnote_become_notes_in_body_and_cell():
+    body = p(
+        run("본문"),
+        note(p(run("각주 하나"), para="1", page_break=True), p(run("각주 둘"))),
+        run(" 뒤"),
+    )
+    table = tbl([[cell(p(run("칸"), note(p(run("칸 각주")))), col=0, row=0)]], cols=1)
+    end = p(run("미주 앞"), note(p(run("미주 글")), kind="endNote"))
+    listed = p(run("목록 주"), note(p(run("가"), para="3"), p(run("나"), para="3")))
+    imported, _ = _read(body + p(table) + end + listed)
+    blocks = imported.doc.content
+    assert kinds(blocks) == ["Para", "Table", "Para", "Para"]
+    assert kinds(blocks[0].content) == ["Str", "Note", "Space", "Str"]
+    # note paragraphs are Para (R1): no heading and no page-break mark inside a note
+    footnote = blocks[0].content[1]
+    assert kinds(footnote.content) == ["Para", "Para"]
+    assert [text(b) for b in footnote.content] == ["각주 하나", "각주 둘"]
+    in_cell = blocks[1].head.content[0].content[0].content  # a one-row table is all head
+    assert kinds(in_cell) == ["Plain"] and kinds(in_cell[0].content) == ["Str", "Note"]
+    assert kinds(in_cell[0].content[1].content) == ["Para"] and text(in_cell[0].content[1]) == "칸 각주"
+    assert kinds(blocks[2].content) == ["Str", "Space", "Str", "Note"] and text(blocks[2].content[3]) == "미주 글"
+    assert kinds(blocks[3].content[-1].content) == ["OrderedList"]
+    # each note paragraph once, on its own, not inside its referencing paragraph's text
+    assert imported.source_text == [
+        "본문 뒤", "각주 하나", "각주 둘", "칸", "칸 각주", "미주 앞", "미주 글", "목록 주", "가", "나",
+    ]
+
+
+def test_empty_footnote_is_dropped():
+    doc, _ = read(p(run("글"), note(p())))
+    assert kinds(doc.content[0].content) == ["Str"]
+
+
+def test_equation_alone_is_code_block_inline_is_code_with_warn():
+    imported, report = _read(
+        p(equation("a over b")),
+        p(run("값 "), equation("x ^{2}", char="1"), run(" 이다")),
+    )
+    blocks = imported.doc.content
+    assert kinds(blocks) == ["CodeBlock", "Para"] and blocks[0].text == "a over b"
+    assert kinds(blocks[1].content) == ["Str", "Space", "Code", "Space", "Str"]
+    assert blocks[1].content[2].text == "x ^{2}"
+    warns = [e for e in report.events if e.code == "HWPX_EQUATION_PRESERVED"]
+    assert [(e.level.value, e.message) for e in warns] == [("warn", "한글 수식을 코드로 남깁니다")] * 2
+    assert imported.source_text == ["값 ", " 이다"]
+
+
+def test_equation_between_text_keeps_full_coverage():
+    data = hwpx_bytes(p(run("값은 "), equation("x over y"), run(" 이다")), p(equation("z")))
+    result = convert(Source(data, "a.hwpx", Format.HWPX), [Format.MD])
+    assert result.report.coverage == 1.0
+    assert "`x over y`" in result.outputs[0].data.decode()
+
+
+def test_header_footer_skipped_with_one_info_and_not_in_source_text():
+    imported, report = _read(
+        p(page_part("header", p(run("머리 글"))), page_part("footer", p(run("꼬리 글"))), run("본문")),
+        p(page_part("header", p(run("둘째 머리"))), run("둘째")),
+    )
+    assert [text(b) for b in imported.doc.content] == ["본문", "둘째"]
+    assert imported.source_text == ["본문", "둘째"]
+    assert skipped(report) == [_SKIPPED]
+    _, plain = _read(p(run("본문")))
+    assert skipped(plain) == []
+
+
+def test_hyperlink_field_becomes_link():
+    command = {"Command": "https\\://example.com/a\\;b?x=1;1;0;0;", "Path": "https://example.com/a;b?x=1"}
+    doc, _ = read(
+        p(run("앞 "), field_begin("5", "HYPERLINK", command), run("링크 "), run("굵게", "1"), field_end("5"), run(" 뒤")),
+        p(field_begin("6", "HYPERLINK", command), run("끝에 공백 "), field_end("6"), run("뒤")),
+    )
+    first = doc.content[0].content
+    assert kinds(first) == ["Str", "Space", "Link", "Space", "Str"]
+    assert first[2].url == "https://example.com/a;b?x=1"
+    assert kinds(first[2].content) == ["Str", "Space", "Strong"] and text(first[2]) == "링크 굵게"
+    second = doc.content[1].content
+    assert kinds(second) == ["Link", "Space", "Str"] and text(second[0]) == "끝에 공백"
+
+
+def test_unbalanced_and_unknown_fields_keep_their_text():
+    link = {"Command": "https\\://example.com;1;0;0;"}
+    doc, _ = read(
+        p(run("가 "), field_begin("1", "HYPERLINK", link), run("열린 채")),  # no fieldEnd
+        p(run("나 "), field_end("2"), run("닫기만")),  # no fieldBegin
+        p(field_begin("3", "DATE"), run("날짜 글"), field_end("3")),
+        p(field_begin("4", "HYPERLINK"), run("주소 없음"), field_end("4")),
+        p(run("빈 "), field_begin("5", "HYPERLINK", link), field_end("5"), run("링크")),
+    )
+    assert [text(b) for b in doc.content] == ["가 열린 채", "나 닫기만", "날짜 글", "주소 없음", "빈 링크"]
+    assert not [e for b in doc.content for e in b.content if isinstance(e, pf.Link)]
+
+
+def test_empty_click_here_keeps_guide_text():
+    guide = {"Direction": "이름을 쓰십시오"}
+    by_command = {"Command": "Clickhere:set:66:Direction:wstring:8:날짜를 고르세요 HelpState:wstring:0: "}
+    imported, _ = _read(
+        p(run("이름: "), field_begin("7", "CLICK_HERE", guide), field_end("7"), run(" 끝")),
+        p(field_begin("8", "CLICK_HERE", guide), run("홍길동"), field_end("8")),
+        p(field_begin("9", "CLICK_HERE", by_command), field_end("9")),
+    )
+    assert [text(b) for b in imported.doc.content] == ["이름: 이름을 쓰십시오 끝", "홍길동", "날짜를 고르세요"]
+    data = hwpx_bytes(p(run("이름:"), field_begin("7", "CLICK_HERE", guide), field_end("7"), run("끝")))
+    assert convert(Source(data, "a.hwpx", Format.HWPX), [Format.MD]).report.coverage == 1.0
+
+
+def test_memo_dropped_with_info():
+    memo = field_begin("9", "MEMO", {"Author": "검토자"}, inner=f"{_SUB_OPEN}{p(run('메모 글'))}</hp:subList>")
+    group = (
+        '<hp:memogroup><hp:memo id="1" memoShapeIDRef="0"><hp:paraList>'
+        f"{p(run('메모 둘'))}</hp:paraList></hp:memo></hp:memogroup>"
+    )
+    imported, report = _read(p(run("앞 "), memo, run("표시 글"), field_end("9"), run(" 뒤")) + group)
+    # the memo goes; the text it was attached to stays
+    assert [text(b) for b in imported.doc.content] == ["앞 표시 글 뒤"]
+    assert imported.source_text == ["앞 표시 글 뒤"]
+    assert skipped(report) == [_SKIPPED]
+
+
+def test_tracked_deletion_is_left_out_of_body_and_source_text():
+    imported, report = _read(
+        p(
+            t('남김 <hp:deleteBegin Id="1" TcId="1" paraend="0"/>지운<hp:tab/>글'),
+            t("굵게 지움", "1"),
+            t('까지<hp:deleteEnd Id="1" TcId="1" paraend="0"/>끝'),
+            t('<hp:insertBegin Id="2" TcId="2" paraend="0"/> 넣은 글<hp:insertEnd Id="2" TcId="2" paraend="0"/>'),
+        ),
+        p(t('가<hp:deleteBegin Id="3" TcId="3" paraend="1"/>나')),  # its end is not in this paragraph
+        p(t('다<hp:deleteEnd Id="4" TcId="4" paraend="0"/>라')),  # an end with no begin
+    )
+    assert [text(b) for b in imported.doc.content] == ["남김 끝 넣은 글", "가나", "다라"]
+    assert kinds(imported.doc.content[0].content) == ["Str", "Space", "Str", "Space", "Str", "Space", "Str"]
+    assert imported.source_text == ["남김 끝 넣은 글", "가나", "다라"]
+    assert skipped(report) == [_SKIPPED]

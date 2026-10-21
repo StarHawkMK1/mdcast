@@ -153,6 +153,29 @@ def test_hwpx_multi_paragraph_cells_and_captions_survive_md_round_trip():
     assert caption_blocks == [("Para", "제목 하나"), ("Para", "제목 둘")]
 
 
+def test_hwpx_footnote_in_table_cell_survives_md_round_trip():
+    footnote = (
+        '<hp:run charPrIDRef="0"><hp:ctrl><hp:footNote number="1" suffixChar="41" instId="1">'
+        '<hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP">'
+        f"{p(run('칸 각주 글'))}</hp:subList></hp:footNote></hp:ctrl></hp:run>"
+    )
+    rows = [
+        [cell(p(run("머리")), col=0, row=0)],
+        [cell(p(run("칸 글"), footnote), col=0, row=1)],
+    ]
+    data = hwpx_bytes(p(tbl(rows, cols=1)))
+    result = convert(Source(data, "a.hwpx", Format.HWPX), [Format.MD])
+    assert result.report.coverage == 1.0
+    md = result.outputs[0].data.decode()
+    assert "[^" in md and "<td>" in md  # a note label in an HTML cell (M3a D9)
+    back = read_md(Source(result.outputs[0].data, "a.md", Format.MD), Report("a.md", Format.MD)).doc
+    assert [type(b).__name__ for b in back.content] == ["Table"]
+    in_cell = back.content[0].content[0].content[0].content[0]
+    notes = []
+    in_cell.walk(lambda e, _d: notes.append(e) if isinstance(e, pf.Note) else None)
+    assert [pf.stringify(n).strip() for n in notes] == ["칸 각주 글"]
+
+
 def test_hwpx_to_docx_is_target_unsupported():
     res = convert(Source(hwpx_bytes(p(run("a"))), "a.hwpx", Format.HWPX), [Format.DOCX, Format.MD])
     errors = [e for e in res.report.events if e.code == Codes.TARGET_UNSUPPORTED]

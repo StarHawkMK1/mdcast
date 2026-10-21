@@ -9,9 +9,10 @@ import panflute as pf
 from lxml import etree
 
 from mdcast.readers.docx_package import PAGEBREAK_SENTINEL
+from mdcast.readers.hwpx.marks import accept_deletions, click_here_guide, hyperlink_url, own
 from mdcast.readers.hwpx.package import HP, CharStyle, HwpxPackage, ParaStyle
 from mdcast.readers.hwpx.tables import read_table
-from mdcast.report import Report
+from mdcast.report import Codes, Report
 
 _PLAIN = CharStyle()
 _BODY = ParaStyle()
@@ -28,21 +29,41 @@ def hp(tag: str) -> str:
 _T, _RUN, _P, _TBL = hp("t"), hp("run"), hp("p"), hp("tbl")
 _SPACE_MARKS = (hp("tab"), hp("nbSpace"), hp("fwSpace"))
 _LINE_BREAK = hp("lineBreak")
+_CTRL, _SUB, _EQUATION, _SCRIPT = hp("ctrl"), hp("subList"), hp("equation"), hp("script")
+_NOTES = (hp("footNote"), hp("endNote"))
+_FIELD_BEGIN, _FIELD_END = hp("fieldBegin"), hp("fieldEnd")
+# paragraphs under these are not body text: page headers and footers, memos (in a MEMO field or
+# a memo group), anything else a field carries
+_NOT_BODY = (hp("header"), hp("footer"), hp("memo"), hp("memogroup"), _FIELD_BEGIN)
+# what IMPORT_HEADER_SKIPPED reports (with MEMO fields): page headers and footers, memos, tracked changes
+_SKIPPED = (
+    hp("header"),
+    hp("footer"),
+    hp("memo"),
+    hp("memogroup"),
+    hp("insertBegin"),
+    hp("deleteBegin"),
+)
+_SKIPPED_MESSAGE = "머리말·꼬리말·메모는 가져오지 않습니다"
+
+
+def _in_body(p: etree._Element) -> bool:
+    return not any(a.tag in _NOT_BODY for a in p.iterancestors())
 
 
 def _own_texts(p: etree._Element) -> list[str]:
     """The paragraph's own ``hp:t`` text, leaving out paragraphs nested in its tables or notes.
 
-    A table splits the text in two, as the reader makes a block before and after it.
+    The text is split where the reader puts something that is not in it: a table (a block before
+    and after it), an equation (its script as code) and a click-here field (its guide text when
+    it is empty).
     """
     pieces: list[list[str]] = [[]]
-    for e in p.iter(_T, _TBL):
-        if next(e.iterancestors(_P), None) is not p:
-            continue
-        if e.tag == _TBL:
-            pieces.append([])
-        else:
+    for e in own(p, _T, _TBL, _EQUATION, _FIELD_BEGIN):
+        if e.tag == _T:
             pieces[-1].append("".join(e.itertext()))
+        elif e.tag != _FIELD_BEGIN or e.get("type") == "CLICK_HERE":
+            pieces.append([])
     return ["".join(piece) for piece in pieces]
 
 
@@ -73,16 +94,21 @@ def _tokens(pieces: list[str | pf.Inline]) -> list[pf.Inline]:
     return out
 
 
-def _styled(inlines: list[pf.Inline], style: CharStyle) -> list[pf.Inline]:
-    """Wrap in the run's formatting; edge spaces and breaks stay outside (``**a **`` is not bold MD)."""
-    if style == _PLAIN:
-        return inlines
+def _edges(inlines: list[pf.Inline]) -> tuple[list[pf.Inline], list[pf.Inline], list[pf.Inline]]:
+    """Leading spaces and breaks, the rest, trailing spaces and breaks."""
     start, end = 0, len(inlines)
     while start < end and isinstance(inlines[start], _EDGE):
         start += 1
     while end > start and isinstance(inlines[end - 1], _EDGE):
         end -= 1
-    core = inlines[start:end]
+    return inlines[:start], inlines[start:end], inlines[end:]
+
+
+def _styled(inlines: list[pf.Inline], style: CharStyle) -> list[pf.Inline]:
+    """Wrap in the run's formatting; edge spaces and breaks stay outside (``**a **`` is not bold MD)."""
+    if style == _PLAIN:
+        return inlines
+    lead, core, trail = _edges(inlines)
     if not core:
         return inlines
     if style.superscript:
@@ -95,7 +121,7 @@ def _styled(inlines: list[pf.Inline], style: CharStyle) -> list[pf.Inline]:
         core = [pf.Emph(*core)]
     if style.bold:
         core = [pf.Strong(*core)]
-    return inlines[:start] + core + inlines[end:]
+    return lead + core + trail
 
 
 def _tidy(inlines: list[pf.Inline]) -> list[pf.Inline]:
@@ -235,8 +261,11 @@ class _Line:
 
     def __init__(self) -> None:
         self._groups: list[tuple[CharStyle, list[str | pf.Inline]]] = []
+        self.chars = 0  # characters of text added, spaces not counted
 
     def add(self, style: CharStyle, piece: str | pf.Inline) -> None:
+        if isinstance(piece, str):
+            self.chars += len(piece.strip())
         if self._groups and self._groups[-1][0] == style:
             self._groups[-1][1].append(piece)
         else:
@@ -254,12 +283,76 @@ class _Line:
             if child.tail:  # also after marks this reader does not know
                 self.add(style, child.tail)
 
-    def take(self) -> list[pf.Inline]:
-        groups, self._groups = self._groups, []
+    def inlines(self) -> list[pf.Inline]:
+        """The inlines so far, formatting applied, spaces at the ends kept."""
         out: list[pf.Inline] = []
-        for style, pieces in groups:
+        for style, pieces in self._groups:
             out.extend(_styled(_tokens(pieces), style))
-        return _tidy(out)
+        return out
+
+    def take(self) -> list[pf.Inline]:
+        out = _tidy(self.inlines())
+        self._groups = []
+        return out
+
+
+class _Fields:
+    """The fields open in a paragraph, and the line their text goes on.
+
+    Only a ``fieldBegin`` whose ``fieldEnd`` (``beginIDRef``) comes after it in the paragraph
+    opens a field; any other begin or end is passed over, so its text reads as if it were not
+    there. A hyperlink's text collects on a line of its own and goes back as a Link; an empty
+    click-here field gets its guide text; every other field (a memo's anchor included) keeps
+    just its text.
+    """
+
+    def __init__(self, ctrls: list[etree._Element], line: _Line) -> None:
+        self._base = line
+        self._open: list[tuple[etree._Element, _Line, int]] = []  # (begin, its line, chars then)
+        self._balanced: set[etree._Element] = set()
+        ends: set[str | None] = set()
+        for ctrl in reversed(ctrls):
+            if ctrl.tag == _FIELD_END:
+                ends.add(ctrl.get("beginIDRef"))
+            elif ctrl.tag == _FIELD_BEGIN and ctrl.get("id") in ends:
+                self._balanced.add(ctrl)
+
+    @property
+    def line(self) -> _Line:
+        return self._open[-1][1] if self._open else self._base
+
+    def begin(self, field: etree._Element) -> None:
+        if field in self._balanced:
+            line = _Line() if field.get("type") == "HYPERLINK" else self.line
+            self._open.append((field, line, line.chars))
+
+    def end(self, end: etree._Element) -> None:
+        ref = end.get("beginIDRef")
+        if all(field.get("id") != ref for field, _, _ in self._open):
+            return
+        while self._open:  # fields opened inside this one and not closed yet end with it
+            done = self._open[-1][0].get("id") == ref
+            self._close()
+            if done:
+                return
+
+    def close_all(self) -> None:
+        """End every open field where the text stops (at a block object, or the paragraph's end)."""
+        while self._open:
+            self._close()
+
+    def _close(self) -> None:
+        field, line, chars = self._open.pop()
+        kind = field.get("type")
+        if kind == "HYPERLINK":
+            lead, core, trail = _edges(line.inlines())
+            url = hyperlink_url(field)
+            for inline in lead + ([pf.Link(*core, url=url)] if url and core else core) + trail:
+                self.line.add(_PLAIN, inline)
+        elif kind == "CLICK_HERE" and line.chars == chars:
+            guide = click_here_guide(field)
+            if guide:
+                line.add(_PLAIN, guide)
 
 
 class BodyReader:
@@ -269,16 +362,32 @@ class BodyReader:
         self.pkg = pkg
         self.report = report
         self.assets = assets  # Task 6 gives this its type; None until pictures are read
+        # tracked changes read as accepted: deleted text leaves the XML before anything reads it
+        for section in pkg.sections:
+            if next(section.iter(hp("deleteBegin")), None) is not None:
+                for p in section.iter(_P):
+                    accept_deletions(p)
         # every paragraph's own text (split around its tables), nested ones (table cells, notes) as
-        # their own entries; it is taken from the XML, not from what this reader makes, so the
-        # coverage check sees what it drops
+        # their own entries, page headers, footers and memos left out; it is taken from the XML,
+        # not from what this reader makes, so the coverage check sees what it drops
         self.source_text: list[str] = [
             text
             for section in pkg.sections
             for p in section.iter(_P)
+            if _in_body(p)
             for text in _own_texts(p)
             if text
         ]
+        self.has_skipped = any(
+            e.tag != _FIELD_BEGIN or e.get("type") == "MEMO"
+            for section in pkg.sections
+            for e in section.iter(*_SKIPPED, _FIELD_BEGIN)
+        )
+
+    def report_skipped(self) -> None:
+        """One info when the document has page headers or footers, memos or tracked changes."""
+        if self.has_skipped:
+            self.report.info(Codes.IMPORT_HEADER_SKIPPED, _SKIPPED_MESSAGE)
 
     def blocks(self) -> list[pf.Block]:
         return self.paragraphs(
@@ -291,34 +400,65 @@ class BodyReader:
             return []
         return _cell_paragraphs(self.paragraphs(sub.iterchildren(_P), in_cell=True))
 
-    def paragraphs(self, ps: Iterable[etree._Element], *, in_cell: bool) -> list[pf.Block]:
-        """A run of sibling paragraphs (a section's or a cell's) → their blocks, in order, lists grouped."""
+    def paragraphs(
+        self, ps: Iterable[etree._Element], *, in_cell: bool, nested: bool = False
+    ) -> list[pf.Block]:
+        """Sibling paragraphs (a section's, a cell's or a note's) → their blocks, in order, lists grouped."""
         return group_lists(
-            ((self._style(p), self.paragraph(p, in_cell=in_cell)) for p in ps),
+            ((self._style(p), self.paragraph(p, in_cell=in_cell, nested=nested)) for p in ps),
             self.pkg.styles.numbering_start,
         )
 
     def _style(self, p: etree._Element) -> ParaStyle:
         return self.pkg.styles.paras.get(p.get("paraPrIDRef") or "", _BODY)
 
-    def paragraph(self, p: etree._Element, *, in_cell: bool) -> list[pf.Block]:
-        """One ``hp:p`` → its blocks: a page-break sentinel, then text split around block objects."""
+    def paragraph(
+        self, p: etree._Element, *, in_cell: bool, nested: bool = False
+    ) -> list[pf.Block]:
+        """One ``hp:p`` → its blocks: a page-break sentinel, then text split around block objects.
+
+        ``in_cell`` paragraphs are Plain, ``nested`` ones (in a note) Para. Only a top-level
+        paragraph becomes a heading or leaves a page-break mark: neither belongs in a note.
+        """
         style = self._style(p)
+        top = not (in_cell or nested)
         blocks: list[pf.Block] = []
-        if not in_cell and p.get("pageBreak") == "1":
+        if top and p.get("pageBreak") == "1":
             blocks.append(pf.Para(pf.Str(PAGEBREAK_SENTINEL)))
         line = _Line()
+        runs = list(p.iterchildren(_RUN))
+        fields = _Fields(
+            [c for run in runs for ctrl in run.iterchildren(_CTRL) for c in ctrl], line
+        )
 
         def flush() -> None:
+            fields.close_all()
             inlines = line.take()
-            if inlines:
-                blocks.append(self._block(inlines, style, in_cell))
+            if len(inlines) == 1 and isinstance(inlines[0], pf.Code):  # an equation on its own
+                blocks.append(pf.CodeBlock(inlines[0].text))
+            elif inlines:
+                blocks.append(self._block(inlines, style, in_cell, top))
 
-        for run in p.iterchildren(_RUN):
+        for run in runs:
             char = self.pkg.styles.chars.get(run.get("charPrIDRef") or "", _PLAIN)
             for child in run:
                 if child.tag == _T:
-                    line.text(child, char)
+                    fields.line.text(child, char)
+                elif child.tag == _EQUATION:
+                    code = self._equation(child)
+                    if code is not None:
+                        fields.line.add(_PLAIN, code)
+                elif child.tag == _CTRL:
+                    for ctrl in child:
+                        if ctrl.tag in _NOTES:
+                            note = self._note(ctrl)
+                            if note is not None:
+                                fields.line.add(_PLAIN, note)
+                        elif ctrl.tag == _FIELD_BEGIN:
+                            fields.begin(ctrl)
+                        elif ctrl.tag == _FIELD_END:
+                            fields.end(ctrl)
+                        # page headers and footers, page numbers, bookmarks: not read
                 elif child.tag == _TBL:
                     flush()
                     table = read_table(child, self)
@@ -330,10 +470,27 @@ class BodyReader:
         flush()
         return blocks
 
+    def _note(self, note: etree._Element) -> pf.Note | None:
+        """A footnote or endnote; its paragraphs are Para (R1). None when it has no text."""
+        sub = note.find(_SUB)
+        if sub is None:
+            return None
+        blocks = self.paragraphs(sub.iterchildren(_P), in_cell=False, nested=True)
+        return pf.Note(*blocks) if blocks else None
+
+    def _equation(self, equation: etree._Element) -> pf.Code | None:
+        """A Hangul equation's script as code; None when it has none."""
+        script = equation.find(_SCRIPT)
+        text = "".join(script.itertext()).strip() if script is not None else ""
+        if not text:
+            return None
+        self.report.warn(Codes.HWPX_EQUATION_PRESERVED, "한글 수식을 코드로 남깁니다")
+        return pf.Code(text)
+
     @staticmethod
-    def _block(inlines: list[pf.Inline], style: ParaStyle, in_cell: bool) -> pf.Block:
+    def _block(inlines: list[pf.Inline], style: ParaStyle, in_cell: bool, top: bool) -> pf.Block:
         if in_cell:
             return pf.Plain(*inlines)
-        if style.kind == "OUTLINE" and style.level < _BODY_OUTLINE:
+        if top and style.kind == "OUTLINE" and style.level < _BODY_OUTLINE:
             return pf.Header(*inlines, level=min(style.level + 1, _MAX_HEADER))
         return pf.Para(*inlines)
