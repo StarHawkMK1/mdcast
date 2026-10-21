@@ -7,7 +7,7 @@ from collections.abc import Callable
 
 import panflute as pf
 
-from mdcast.ast import QUIET, convert_doc, copy_element
+from mdcast.ast import QUIET, convert_doc, copy_element, grid_cells
 
 PIPE_CELL_FORMAT = "gfm+tex_math_dollars-tex_math_gfm"
 _TAG = re.compile(r"<[A-Za-z][^<>]*>")
@@ -145,18 +145,44 @@ def _blocks_html(blocks: list[pf.Block], note_label: Callable[[pf.Note], str], b
     return batch.add([b.walk(action, stop_if=lambda e: isinstance(e, pf.Table)) for b in blocks])
 
 
-def _cell_html(cell: pf.TableCell, tag: str, note_label: Callable[[pf.Note], str], batch: CellBatch) -> str:
+def _cell_html(
+    cell: pf.TableCell, tag: str, note_label: Callable[[pf.Note], str], batch: CellBatch, align: str | None = None
+) -> str:
     attrs = ""
     if cell.rowspan > 1:
         attrs += f' rowspan="{cell.rowspan}"'
     if cell.colspan > 1:
         attrs += f' colspan="{cell.colspan}"'
+    if align:
+        attrs += f' align="{align}"'
     return f"<{tag}{attrs}>{_blocks_html(list(cell.content), note_label, batch)}</{tag}>"
 
 
 def _row_html(row: pf.TableRow, tag: str, note_label: Callable[[pf.Note], str], batch: CellBatch) -> str:
     cells = "".join(_cell_html(c, tag, note_label, batch) for c in row.content)
     return f"<tr>{cells}</tr>"
+
+
+_HTML_ALIGN = {"AlignLeft": "left", "AlignCenter": "center", "AlignRight": "right"}
+
+
+def _column_align(table: pf.Table, col: int, span: int) -> str | None:
+    """The alignment of the columns a cell covers, when they share one."""
+    found = {align for align, _ in table.colspec[col:col + span]}
+    return _HTML_ALIGN.get(found.pop()) if len(found) == 1 else None
+
+
+def _body_html(table: pf.Table, rows: list[pf.TableRow], note_label: Callable[[pf.Note], str], batch: CellBatch) -> list[str]:
+    """Body rows with the column alignment on every cell: pandoc's HTML reader reads it there, not from th or col."""
+    starts = {id(cell): col for cell, col in grid_cells(rows)}
+    out = []
+    for row in rows:
+        cells = "".join(
+            _cell_html(c, "td", note_label, batch, _column_align(table, starts[id(c)], max(1, c.colspan)))
+            for c in row.content
+        )
+        out.append(f"<tr>{cells}</tr>")
+    return out
 
 
 def table_to_html(table: pf.Table, note_label: Callable[[pf.Note], str], batch: CellBatch) -> str:
@@ -175,7 +201,7 @@ def table_to_html(table: pf.Table, note_label: Callable[[pf.Note], str], batch: 
     body_rows = _rows(table)[len(table.head.content) if table.head else 0:]
     if body_rows:
         out.append("<tbody>")
-        out += [_row_html(r, "td", note_label, batch) for r in body_rows]
+        out += _body_html(table, body_rows, note_label, batch)
         out.append("</tbody>")
     out.append("</table>")
     return "\n".join(out)

@@ -361,3 +361,39 @@ def test_table_inside_a_cell_note_keeps_its_cells():
     assert "mdcast-cell" not in md
     assert all(text in md for text in ("n1", "n2", "n3", "n4"))
     assert all(text in note_texts(back(md))[0] for text in ("앞", "n1", "n4"))
+
+
+def aligns(table: pf.Table) -> list[str]:
+    return [a for a, _ in table.colspec]
+
+
+def cell_aligns(table: pf.Table) -> list[list[str]]:
+    rows = [r for body in table.content for r in body.content]
+    return [[c.alignment for c in r.content] for r in rows]
+
+
+def test_html_table_keeps_column_alignment():
+    captioned = make_table(
+        [[cell(txt("항목")), cell(txt("값")), cell(txt("비고"))]],
+        [[cell(txt("가")), cell(txt("1")), cell(txt("중앙"))], [cell(txt("나")), cell(txt("2")), cell(txt("중앙"))]],
+        caption=[pf.Plain(pf.Str("요약"))],
+    )
+    captioned.colspec = [("AlignLeft", "ColWidthDefault"), ("AlignRight", "ColWidthDefault"), ("AlignCenter", "ColWidthDefault")]
+    md = write_md(doc_with(captioned), {})
+    assert '<td align="right">1</td>' in md and "<th>값</th>" in md
+    got = tables(back(md))[0]
+    assert aligns(got) == ["AlignLeft", "AlignRight", "AlignCenter"]
+    assert cell_aligns(got) == [["AlignDefault"] * 3] * 2  # like a pipe table: the column holds it
+
+
+def test_html_table_alignment_survives_a_spanning_first_row():
+    table = make_table(
+        [[cell(txt("a")), cell(txt("b"))]],
+        [[cell(txt("합친 칸"), colspan=2)], [cell(txt("1")), cell(txt("2"))]],
+    )
+    table.colspec = [("AlignCenter", "ColWidthDefault"), ("AlignRight", "ColWidthDefault")]
+    md = write_md(doc_with(table), {})
+    assert '<td colspan="2">합친 칸</td>' in md  # its columns disagree: no alignment of its own
+    got = tables(back(md))[0]
+    assert aligns(got) == ["AlignCenter", "AlignRight"]
+    assert cell_aligns(got) == [["AlignDefault"], ["AlignDefault"] * 2]

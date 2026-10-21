@@ -151,3 +151,21 @@ def test_pandoc_warnings_are_not_printed(caplog, capfd):
     assert [pf.stringify(n).strip() for n in _all(got.doc) if isinstance(n, pf.Note)] == ["칸 각주"]
     assert not [r for r in caplog.records if r.name == "pypandoc"]
     assert "[WARNING]" not in capfd.readouterr().err
+
+
+def test_html_table_column_alignment_comes_from_its_body_cells():
+    # pandoc reads only the first body row; a spanning cell there would align both columns
+    html = (
+        "<table><tbody>"
+        '<tr><td colspan="2" align="right">합계</td></tr>'
+        '<tr><td align="center">a</td><td>1</td></tr>'
+        '<tr><td align="center">b</td><td align="right">2</td></tr>'
+        '<tr><td align="center">c</td><td>3</td></tr>'
+        "</tbody></table>\n"
+    )
+    md, _ = read(html.encode())
+    table = md.doc.content[0]
+    assert [a for a, _ in table.colspec] == ["AlignCenter", "AlignDefault"]
+    got = [[c.alignment for c in r.content] for r in table.content[0].content]
+    # what differs from its column stays on the cell, so export draws it as before
+    assert got == [["AlignRight"], ["AlignDefault"] * 2, ["AlignDefault", "AlignRight"], ["AlignDefault"] * 2]

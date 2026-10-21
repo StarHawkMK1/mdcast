@@ -5,6 +5,7 @@ from typing import Any
 
 import panflute as pf
 
+from mdcast.ast import grid_cells
 from mdcast.filters._raw import raw_block
 from mdcast.filters.context import FilterContext
 from mdcast.report import Codes
@@ -63,22 +64,7 @@ def _style(table: pf.Table, settings: dict[str, Any]) -> None:
 
 def first_column_cells(rows: list[pf.TableRow]) -> list[pf.TableCell]:
     """Cells that start in grid column 0; a row whose column 0 is covered by a rowspan has none."""
-    covered: list[int] = []  # per column: rows still covered by a rowspan from above
-    cells: list[pf.TableCell] = []
-    for row in rows:
-        col = 0
-        for cell in row.content:
-            while col < len(covered) and covered[col] > 0:
-                col += 1
-            if col == 0:
-                cells.append(cell)
-            span = max(1, cell.colspan)
-            covered.extend([0] * (col + span - len(covered)))
-            for c in range(col, col + span):
-                covered[c] = max(1, cell.rowspan)
-            col += span
-        covered = [max(0, n - 1) for n in covered]
-    return cells
+    return [cell for cell, col in grid_cells(rows) if col == 0]
 
 
 def _in_footnote(elem: pf.Element) -> bool:

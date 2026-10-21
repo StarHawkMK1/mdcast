@@ -46,6 +46,25 @@ def html_to_blocks(html: str) -> list[pf.Element]:
     return list(json_to_doc(pypandoc.convert_text(html, "json", format="html", extra_args=QUIET)).content)
 
 
+def grid_cells(rows: list[pf.TableRow]) -> list[tuple[pf.TableCell, int]]:
+    """Each cell with the grid column it starts in, skipping columns a rowspan from above covers."""
+    covered: list[int] = []  # per column: rows still covered by a rowspan from above
+    cells: list[tuple[pf.TableCell, int]] = []
+    for row in rows:
+        col = 0
+        for cell in row.content:
+            while col < len(covered) and covered[col] > 0:
+                col += 1
+            cells.append((cell, col))
+            span = max(1, cell.colspan)
+            covered.extend([0] * (col + span - len(covered)))
+            for c in range(col, col + span):
+                covered[c] = max(1, cell.rowspan)
+            col += span
+        covered = [max(0, n - 1) for n in covered]
+    return cells
+
+
 def convert_doc(
     doc: pf.Doc,
     to: str,

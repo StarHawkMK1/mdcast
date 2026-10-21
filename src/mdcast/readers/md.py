@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import re
 import urllib.parse
+from collections import Counter
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
 import panflute as pf
 
-from mdcast.ast import html_to_blocks, md_to_doc
+from mdcast.ast import grid_cells, html_to_blocks, md_to_doc
 from mdcast.report import Codes, Report
 from mdcast.types import Source
 
@@ -114,6 +115,25 @@ def _span_math(elem: pf.Element, _doc: pf.Doc):
     return pf.Math(text[len(start):-len(end)], format=fmt)
 
 
+def _column_alignment(elem: pf.Element, _doc: pf.Doc) -> None:
+    """Column alignment from the body cells, not pandoc's first body row (a spanning cell there aligns
+    every column it covers); a cell keeps only an alignment its columns do not already give it."""
+    if not isinstance(elem, pf.Table):
+        return
+    rows = [r for body in elem.content for r in (*body.head, *body.content)]
+    rows += list(elem.foot.content) if elem.foot else []
+    cells = grid_cells(rows)
+    colspec = list(elem.colspec)
+    for col, (_, width) in enumerate(colspec):
+        seen = [cell.alignment for cell, at in cells if at == col and cell.colspan == 1]
+        if seen:
+            colspec[col] = (Counter(seen).most_common(1)[0][0], width)
+    elem.colspec = colspec
+    for cell, at in cells:
+        if {align for align, _ in colspec[at:at + max(1, cell.colspan)]} == {cell.alignment}:
+            cell.alignment = "AlignDefault"
+
+
 def expand_html_tables(doc: pf.Doc, definitions: dict[str, str] | None = None) -> pf.Doc:
     def is_table(elem: pf.Element) -> bool:
         return isinstance(elem, pf.RawBlock) and elem.format == "html" and bool(_TABLE_START.match(elem.text))
@@ -125,7 +145,7 @@ def expand_html_tables(doc: pf.Doc, definitions: dict[str, str] | None = None) -
 
     def action(elem: pf.Element, _doc: pf.Doc):
         if is_table(elem):
-            blocks = [b.walk(_span_math) for b in html_to_blocks(elem.text)]
+            blocks = [b.walk(_span_math).walk(_column_alignment) for b in html_to_blocks(elem.text)]
             if blocks and notes:
                 blocks = [b.walk(lambda e, d: _link_notes(e, notes)) for b in blocks]
             if blocks:

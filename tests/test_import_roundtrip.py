@@ -17,7 +17,6 @@ from mdcast.readers.md import read_md
 from mdcast.report import Report
 from mdcast.templates import resolve_template
 from mdcast.types import Format, Options, Source
-from mdcast.writers.md.tables import is_simple_table
 
 FIXTURES = Path(__file__).parent / "fixtures" / "md"
 # kinds, numbering and a page-break rule: the export-added state Task 8 must take back out
@@ -105,15 +104,8 @@ def normalize(doc: pf.Doc, *, rule_levels: set[int], known_kinds: set[str] | Non
 
     ``known_kinds`` None keeps every table-kind marker (the side that must not lose one).
     """
-    doc = doc.walk(lambda e, _d: _html_table_alignment(e))
     blocks = json.loads(json.dumps(doc.to_json()))["blocks"]
     return _node(blocks, rule_levels, known_kinds)
-
-
-def _html_table_alignment(elem: pf.Element) -> None:
-    # pending the user's decision (§5.4 b): a table the MD writer writes as HTML loses column alignment
-    if isinstance(elem, pf.Table) and not is_simple_table(elem):
-        elem.colspec = [("AlignDefault", width) for _, width in elem.colspec]
 
 
 def _front(meta: dict[str, Any]) -> dict[str, Any]:
