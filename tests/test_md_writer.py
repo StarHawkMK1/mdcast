@@ -476,3 +476,10 @@ def test_hard_break_in_heading_is_written_as_space():
     again = back(write_md(doc, {}))
     assert kinds(again) == ["Header", "Para"]
     assert pf.stringify(again.content[0]) == "a : b"
+
+
+def test_superscript_and_subscript_round_trip():
+    doc = doc_with(pf.Para(pf.Str("x"), pf.Superscript(pf.Str("*")), pf.Str("y"), pf.Subscript(pf.Str("2"))))
+    again = back(write_md(doc, {}))
+    assert [type(i).__name__ for i in again.content[0].content] == ["Str", "Superscript", "Str", "Subscript"]
+    assert pf.stringify(again) == pf.stringify(doc)

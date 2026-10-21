@@ -169,3 +169,21 @@ def test_html_table_column_alignment_comes_from_its_body_cells():
     got = [[c.alignment for c in r.content] for r in table.content[0].content]
     # what differs from its column stays on the cell, so export draws it as before
     assert got == [["AlignRight"], ["AlignDefault"] * 2, ["AlignDefault", "AlignRight"], ["AlignDefault"] * 2]
+
+
+def test_paired_sup_and_sub_tags_become_superscript_and_subscript():
+    md, _ = read(b"x<sup>\\*</sup>y<sub>2</sub> <SUP>a<sub>b</sub></SUP> **<sup>c</sup>**\n")
+    para = md.doc.content[0]
+    assert not [e for e in _all(md.doc) if isinstance(e, pf.RawInline)]
+    sups = [e for e in _all(md.doc) if isinstance(e, pf.Superscript)]
+    subs = [e for e in _all(md.doc) if isinstance(e, pf.Subscript)]
+    assert [pf.stringify(e) for e in sups] == ["*", "ab", "c"]
+    assert [pf.stringify(e) for e in subs] == ["2", "b"]
+    assert pf.stringify(para).strip() == "x*y2 ab c"
+
+
+def test_unpaired_sup_tag_stays_raw_html():
+    md, _ = read(b"a<sup>b and c</sub>d\n")
+    raws = [e.text for e in _all(md.doc) if isinstance(e, pf.RawInline)]
+    assert raws == ["<sup>", "</sub>"]
+    assert not [e for e in _all(md.doc) if isinstance(e, (pf.Superscript, pf.Subscript))]

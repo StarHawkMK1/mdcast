@@ -176,6 +176,55 @@ def _decode_image_paths(doc: pf.Doc) -> pf.Doc:
     return doc.walk(action)
 
 
+_SCRIPT_TAG = re.compile(r"<(/?)(sup|sub)\s*>", re.IGNORECASE)
+_SCRIPTS: dict[str, type[pf.Inline]] = {"sup": pf.Superscript, "sub": pf.Subscript}
+
+
+def _script_tag(elem: pf.Element) -> tuple[bool, str] | None:
+    """(closing, name) of a bare ``<sup>``/``</sup>``/``<sub>``/``</sub>`` raw HTML inline."""
+    if not isinstance(elem, pf.RawInline) or elem.format != "html":
+        return None
+    m = _SCRIPT_TAG.fullmatch(elem.text)
+    return (bool(m.group(1)), m.group(2).lower()) if m else None
+
+
+def _paired_scripts(items: list[pf.Inline]) -> list[pf.Inline]:
+    out: list[pf.Inline] = []
+    i = 0
+    while i < len(items):
+        tag = _script_tag(items[i])
+        if tag and not tag[0]:
+            depth, j = 0, i + 1
+            while j < len(items):
+                other = _script_tag(items[j])
+                if other and other[1] == tag[1]:
+                    if not other[0]:
+                        depth += 1
+                    elif depth:
+                        depth -= 1
+                    else:
+                        break
+                j += 1
+            if j < len(items):
+                out.append(_SCRIPTS[tag[1]](*_paired_scripts(items[i + 1:j])))
+                i = j + 1
+                continue
+        out.append(items[i])
+        i += 1
+    return out
+
+
+def _scripts(elem: pf.Element, _doc: pf.Doc) -> None:
+    """Paired raw ``<sup>…</sup>`` / ``<sub>…</sub>`` back to Superscript / Subscript (R2a).
+
+    The GFM writer has no other way to write them; pandoc's markdown reader keeps each tag as a
+    raw HTML inline of its own, the text between them as ordinary inlines.
+    """
+    content = getattr(elem, "content", None)
+    if isinstance(content, pf.ListContainer) and any(_script_tag(e) for e in content):
+        elem.content = _paired_scripts(list(content))
+
+
 def _yaml_error_detail(exc: RuntimeError) -> str:
     lines = [line.strip() for line in str(exc).splitlines() if line.strip()]
     return next((line for line in lines if "YAML" in line), lines[0] if lines else "")
@@ -192,12 +241,12 @@ def read_md(source: Source, report: Report) -> MdDocument:
             raise
         body = _decode_image_paths(
             expand_html_tables(md_to_doc(text[block.end():]), collect_note_definitions(text[block.end():]))
-        )
+        ).walk(_scripts)
         report.warn(
             Codes.FRONTMATTER_INVALID,
             f"frontmatter(YAML)를 해석할 수 없어 무시합니다: {_yaml_error_detail(exc)}",
         )
         return MdDocument(body, {})
-    doc = _decode_image_paths(expand_html_tables(doc, collect_note_definitions(text)))
+    doc = _decode_image_paths(expand_html_tables(doc, collect_note_definitions(text))).walk(_scripts)
     meta = doc.get_metadata()
     return MdDocument(doc, dict(meta) if isinstance(meta, dict) else {})
