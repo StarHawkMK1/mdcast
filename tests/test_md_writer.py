@@ -672,3 +672,18 @@ def test_html_cell_keeps_a_variation_selector_it_has():
         md = write_md(doc_with(_merged_with(text)), {})
         got = tables(back(md))[0].content[0].content[0].content
         assert [pf.stringify(c).strip() for c in got] == [text, text]
+
+
+def test_highlighted_code_in_html_cell_keeps_its_arrow():
+    """Code with a language class is highlighted: it gets no selector from pandoc and is not shielded."""
+    text = "a\u2194b"
+    for lang in ("python", "haskell", "c"):
+        table = make_table(
+            [[cell(txt("h"), colspan=2)]],
+            [[cell(pf.CodeBlock(text, classes=[lang])), cell(pf.Plain(pf.Code(text, classes=[lang])))]],
+        )
+        md = write_md(doc_with(table), {})
+        assert "mdcast-cell" not in md and "\ufe0e" not in md
+        block, inline = tables(back(md))[0].content[0].content[0].content
+        assert first(block, pf.CodeBlock).text == text
+        assert first(inline, pf.Code).text == text

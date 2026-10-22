@@ -120,7 +120,12 @@ class CellBatch:
         self._texts = [self._finish(part) for part in parts]
 
     def _hide(self, elem: pf.Element, _doc: pf.Doc) -> None:
-        if isinstance(elem, (pf.Str, pf.Code, pf.CodeBlock)):
+        """Only where pandoc's HTML writer adds the selector: plain text and inline code without a
+        class (measured). A code block never gets one, and code with a language class goes through
+        the highlighter, whose lexer would split the token so it could not be put back. Inline code
+        with a class pandoc has no lexer for still gets pandoc's selector (left as it is).
+        """
+        if isinstance(elem, pf.Str) or (isinstance(elem, pf.Code) and not elem.classes):
             for ch in self._shield:
                 elem.text = elem.text.replace(ch, f"{self._mark}x{ord(ch):x}x")
 
