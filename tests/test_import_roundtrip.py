@@ -14,7 +14,7 @@ from helpers import export, write_template
 
 from mdcast.pipeline import convert
 from mdcast.readers.md import read_md
-from mdcast.report import Codes, Report
+from mdcast.report import Codes, Level, Report
 from mdcast.templates import resolve_template
 from mdcast.types import Format, Options, Source
 
@@ -209,6 +209,57 @@ def test_hwpx_roundtrip_keeps_body(tmp_path, name, template):
     assert back.frontmatter.get("template") == (template or "default")
     assert result.report.coverage == 1.0
     assert not [e for e in result.report.events if e.code == Codes.IMPORT_TABLE_UNWRAPPED]  # no form tables here
+
+
+def _counts(doc: pf.Doc) -> dict[str, Any]:
+    """What the pdf round trip compares: h1·h2 (level, text), tables, merged cells, pictures."""
+    out: dict[str, Any] = {"headings": [], "tables": 0, "rowspan": 0, "colspan": 0, "images": 0}
+
+    def count(elem: pf.Element, _doc: pf.Doc) -> None:
+        if isinstance(elem, pf.Header) and elem.level <= 2:  # h3 and below: M3c §5 allowed loss
+            out["headings"].append((elem.level, pf.stringify(elem)))
+        elif isinstance(elem, pf.Table):
+            out["tables"] += 1
+        elif isinstance(elem, pf.TableCell):
+            out["rowspan"] += elem.rowspan > 1
+            out["colspan"] += elem.colspan > 1
+        elif isinstance(elem, pf.Image):
+            out["images"] += 1
+
+    doc.walk(count)
+    return out
+
+
+@pytest.mark.parametrize("name", ["kitchen-sink.md", "korean-report.md"])
+def test_pdf_roundtrip_counts(tmp_path, name):
+    """M3c §7: through pdf (built-in default) the body is not compared block by block, only by counts.
+
+    Bold is not asserted: without 맑은 고딕 on the system the bundled variable Noto draws it, whose
+    bold keeps no bold font name. Running headers are not asserted either: they are dropped only
+    from 3 pages on (M3c §4.5), and the page count follows the fonts the system has.
+    """
+    shutil.copytree(FIXTURES / "assets", tmp_path / "assets")
+    # the fixture's sample.png is 1×1 px, drawn at under 1pt: a decoration the reader drops by
+    # design (M3c §4.6). A real-sized picture in its place checks that pictures come back.
+    shutil.copy(FIXTURES / "assets" / "screen.png", tmp_path / "assets" / "sample.png")
+    md = (FIXTURES / name).read_text(encoding="utf-8")
+    original = _read(md, tmp_path)
+    data = export(tmp_path, md, Format.PDF)
+    result = convert(
+        Source(data, "x.pdf", Format.PDF), [Format.MD], options=Options(cwd=tmp_path, home=tmp_path / "home")
+    )
+    out = result.outputs[0]
+    (tmp_path / "x_assets").mkdir()
+    for path, picture in out.assets.items():
+        (tmp_path / path).write_bytes(picture)
+    back = _read(out.data.decode("utf-8"), tmp_path)
+
+    assert result.report.coverage == 1.0
+    assert _counts(back.doc) == _counts(original.doc)
+    assert back.frontmatter.get("template") == "default"
+    assert _front(back.frontmatter) == _front(original.frontmatter)
+    warned = {e.code for e in result.report.events if e.level is Level.WARN}
+    assert not warned & {Codes.PDF_MULTICOLUMN_SUSPECTED, Codes.PDF_SCANNED_SUSPECTED, Codes.IMPORT_OBJECT_SKIPPED}
 
 
 def _cells(doc: pf.Doc) -> list[str]:
