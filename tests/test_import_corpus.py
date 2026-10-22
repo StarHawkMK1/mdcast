@@ -443,9 +443,9 @@ def test_pdf_notice_corpus():
     """공고문 (11 pages): the ``- n -`` page number goes from all 11 pages; 28 ruled tables, no pictures.
 
     The tables are those pdfplumber finds per page (1, 2, 2, 6, 2, 1, 3, 4, 5, 1, 1; the 2×1 boxes
-    of pages 4, 8 and 9 among them), colspans on pages 2, 5, 6 and 10. Nine tables on pages 3, 5, 7,
-    10 and 11 have no outer left/right rules: their body rows' outer cells are not found, so their
-    text follows the table as body text and the 5 visible rowspans of pages 5 and 10 are not counted.
+    of pages 4, 8 and 9 among them). Nine tables on pages 3, 5, 7, 10 and 11 have no outer
+    left/right rules and are closed by ``open_sides``: their outer cells hold their text, which
+    gives the rowspans of pages 5 (2) and 10 (3) and the colspans of pages 2, 5, 6 and 10 (2).
     """
     counts = _pdf_counts("*공고문*.pdf")
     _check(counts, {
@@ -453,23 +453,23 @@ def test_pdf_notice_corpus():
         "header_skipped": 1,
         "header_lines_skipped": 11,
         "tables": 28,
-        "rowspan": 0,
-        "colspan": 4,
-        "rowspan_sum": 0,
-        "colspan_sum": 8,
+        "rowspan": 5,
+        "colspan": 5,
+        "rowspan_sum": 18,
+        "colspan_sum": 10,
         "images": 0,
         "image_files": 0,
         "assets": 0,
-        "headers": 3,
+        "headers": 1,
         "h1": 1,  # the title, page 1
-        "h2": 2,  # pages 5 and 10, from number shape
+        "h2": 0,
         "h3": 0,
         "h4": 0,
         "h5": 0,
         "h6": 0,
-        "headings_inferred": 2,
-        "list_items": 46,
-        "lists_inferred": 46,
+        "headings_inferred": 0,
+        "list_items": 39,
+        "lists_inferred": 39,
     })
 
 
