@@ -159,7 +159,10 @@ def read_body(pkg: PdfPackage, report: Report, assets: Assets) -> tuple[list[pf.
     the whole document, so a paragraph may run on from one page to the next; a table or a picture
     ends the paragraph before it. Table cells are grouped with the same layout.
     """
-    pages = [read_page(number, page) for number, page in enumerate(pkg.pdf.pages)]
+    pages: list[Page] = []
+    for number, pdf_page in enumerate(pkg.pdf.pages):
+        pages.append(read_page(number, pdf_page))
+        pdf_page.close()  # let its parsed objects go (MBs a page); a picture is drawn from the file
     warn_pages(pages, report)
     if small := sum(page.small for page in pages):
         report.info(Codes.IMPORT_OBJECT_SKIPPED, f"장식으로 보이는 작은 그림 {small}개를 가져오지 않습니다")

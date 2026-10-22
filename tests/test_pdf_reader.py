@@ -13,7 +13,7 @@ from pdfplumber.utils.exceptions import PdfminerException
 
 from mdcast.cli import main
 from mdcast.pipeline import convert
-from mdcast.readers.pdf import read_pdf
+from mdcast.readers.pdf import body, read_pdf
 from mdcast.readers.pdf.lines import is_bold, page_lines
 from mdcast.readers.pdf.model import Box
 from mdcast.readers.pdf.package import generator_from_keywords
@@ -71,6 +71,26 @@ def test_unreadable_page_tree_is_input_corrupt(monkeypatch):
     errors = [e for e in result.report.events if e.level is Level.ERROR]
     assert [e.code for e in errors] == [Codes.INPUT_CORRUPT]
     assert "PDF 파일로 열 수 없습니다" in errors[0].message
+
+
+def test_each_page_closed_once_read(monkeypatch):
+    """A page's parsed objects are let go before the next page is read, not when the PDF is closed
+    (several MB a page). Pictures are drawn later from the file, not from those objects."""
+    events: list[str] = []
+    read_page, close = body.read_page, pdfplumber.page.Page.close
+
+    def reading(number, page):
+        events.append(f"read {number}")
+        return read_page(number, page)
+
+    def closing(self):
+        events.append(f"close {self.page_number - 1}")
+        close(self)
+
+    monkeypatch.setattr(body, "read_page", reading)
+    monkeypatch.setattr(pdfplumber.page.Page, "close", closing)
+    imported(typst_pdf("첫 쪽\n#pagebreak()\n둘째 쪽\n#pagebreak()\n셋째 쪽"))
+    assert events[:6] == ["read 0", "close 0", "read 1", "close 1", "read 2", "close 2"]
 
 
 @pytest.mark.parametrize(
