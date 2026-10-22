@@ -35,6 +35,7 @@ class FakePage:
     height: float = 842.0
     bbox: tuple[float, float, float, float] = (0, 0, 595, 842)
     images: tuple[dict, ...] = ()
+    curves: tuple[dict, ...] = ()
 
     def find_tables(self) -> list[FakeTable]:
         return self.tables

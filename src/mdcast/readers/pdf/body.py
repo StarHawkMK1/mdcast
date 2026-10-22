@@ -12,6 +12,7 @@ import panflute as pf
 import pdfplumber
 
 from mdcast.readers.media import Assets
+from mdcast.readers.pdf.checks import SPLIT, multicolumn, scanned, vector_heavy
 from mdcast.readers.pdf.headings import heading_level, heading_sizes
 from mdcast.readers.pdf.images import image_boxes, is_small, render
 from mdcast.readers.pdf.lines import Char, centre, page_lines
@@ -48,6 +49,7 @@ class Page:
     pictures: list[Picture] = dataclasses.field(default_factory=list)  # outside table cells
     cell_pictures: dict[Box, list[Picture]] = dataclasses.field(default_factory=dict)
     small: int = 0  # pictures dropped as decoration
+    warnings: frozenset[str] = frozenset()  # the codes ``warn_pages`` gives for this page
 
     def flow(self) -> list[Item]:
         """Lines, tables and pictures in reading order: top to bottom, left to right at the same height."""
@@ -60,7 +62,7 @@ def read_page(number: int, page: pdfplumber.page.Page) -> Page:
 
     Cells rather than table outlines decide, so a character inside a table's outline but in no
     cell stays body text instead of being lost. A picture smaller than ``SMALL_PT`` both ways is
-    decoration: counted, not kept.
+    decoration: counted, not kept. The page is judged for ``warn_pages`` with its own size.
     """
     tables = find_tables(page)
 
@@ -92,7 +94,19 @@ def read_page(number: int, page: pdfplumber.page.Page) -> Page:
             cell = cell_at((box.x0 + box.x1) / 2, (box.top + box.bottom) / 2)
             (pictures if cell is None else cell_pictures[cell]).append(Picture(box))
     small = sum(is_small(box) for box in boxes)
-    return Page(number, page.height, lines, tables, cell_lines, pictures, dict(cell_pictures), small)
+
+    page_box = Box(*page.bbox)
+    warnings: set[str] = set()
+    if multicolumn(page_lines(number, outside, split=SPLIT), page_box.width):
+        warnings.add(Codes.PDF_MULTICOLUMN_SUSPECTED)
+    if scanned(sum(bool(c["text"].strip()) for c in page.chars), boxes, page_box):
+        warnings.add(Codes.PDF_SCANNED_SUSPECTED)
+    if vector_heavy(page.curves, [t.box for t in tables]):
+        warnings.add(Codes.IMPORT_OBJECT_SKIPPED)
+    return Page(
+        number, page.height, lines, tables, cell_lines, pictures, dict(cell_pictures), small,
+        frozenset(warnings),
+    )
 
 
 class Drawings:
@@ -129,6 +143,7 @@ def read_body(pkg: PdfPackage, report: Report, assets: Assets) -> tuple[list[pf.
     ends the paragraph before it. Table cells are grouped with the same layout.
     """
     pages = [read_page(number, page) for number, page in enumerate(pkg.pdf.pages)]
+    warn_pages(pages, report)
     if small := sum(page.small for page in pages):
         report.info(Codes.IMPORT_OBJECT_SKIPPED, f"장식으로 보이는 작은 그림 {small}개를 가져오지 않습니다")
     drop_repeats(pages, report)
@@ -162,6 +177,26 @@ def read_body(pkg: PdfPackage, report: Report, assets: Assets) -> tuple[list[pf.
         elif (image := drawings.image(page, item)) is not None:
             blocks.append(pf.Para(image))
     return blocks, source
+
+
+_WARNINGS = {
+    Codes.PDF_MULTICOLUMN_SUSPECTED: (
+        "여러 단으로 짠 쪽이 있어 읽기 순서가 섞였을 수 있습니다. 순서가 중요하면 다른 도구로 바꾸는 편이 낫습니다"
+    ),
+    Codes.PDF_SCANNED_SUSPECTED: "글자 없이 그림만 있는 쪽이 있습니다(스캔본으로 보임). 글자 인식(OCR)은 하지 않습니다",
+    Codes.IMPORT_OBJECT_SKIPPED: "선과 도형으로 그린 그림이 있어 보입니다. 그림으로 가져오지 못하고 그 안의 글자만 옮깁니다",
+}
+_ALL_SCANNED = "모든 쪽이 그림뿐입니다(스캔본으로 보임). 글자 인식(OCR)은 하지 않습니다"
+
+
+def warn_pages(pages: Sequence[Page], report: Report) -> None:
+    """Each warning the pages were judged to need, once for the document with its pages (from 1)."""
+    for code, message in _WARNINGS.items():
+        hits = [page.number + 1 for page in pages if code in page.warnings]
+        if code == Codes.PDF_SCANNED_SUSPECTED and len(hits) == len(pages):
+            message = _ALL_SCANNED
+        if hits:
+            report.warn(code, message, pages=hits)
 
 
 def drop_repeats(pages: Sequence[Page], report: Report) -> None:

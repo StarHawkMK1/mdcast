@@ -18,18 +18,21 @@ def is_bold(fontname: str) -> bool:
     return "bold" in fontname.lower()
 
 
-def page_lines(page: int, chars: Sequence[Char], skip: Sequence[Box] = ()) -> list[Line]:
+def page_lines(
+    page: int, chars: Sequence[Char], skip: Sequence[Box] = (), split: float | None = None
+) -> list[Line]:
     """The lines of ``chars``, top to bottom and left to right at the same height.
 
     A character whose centre lies in a ``skip`` box is left out. Rotated characters (not
-    ``upright``) are kept: they make lines of their own, read down a column.
+    ``upright``) are kept: they make lines of their own, read down a column. With ``split``, a gap
+    wider than that between two characters starts a new line, as between two columns.
     """
     kept = [c for c in chars if not any(box.contains(*centre(c)) for box in skip)]
     upright = [c for c in kept if c.get("upright", True)]
     rotated = [c for c in kept if not c.get("upright", True)]
-    lines = [_line(page, group, "x0", "x1") for group in _groups(upright, "top", "x0")]
-    lines += [_line(page, group, "top", "bottom") for group in _groups(rotated, "x0", "top")]
-    return sorted((ln for ln in lines if ln is not None), key=lambda ln: (ln.box.top, ln.box.x0))
+    lines = [ln for g in _groups(upright, "top", "x0") for ln in _lines(page, g, "x0", "x1", split)]
+    lines += [ln for g in _groups(rotated, "x0", "top") for ln in _lines(page, g, "top", "bottom", split)]
+    return sorted(lines, key=lambda ln: (ln.box.top, ln.box.x0))
 
 
 def centre(c: Char) -> tuple[float, float]:
@@ -47,6 +50,22 @@ def _groups(chars: list[Char], across: str, along: str) -> list[list[Char]]:
             groups.append([c])
         last = c[across]
     return [sorted(group, key=lambda c: c[along]) for group in groups]
+
+
+def _lines(page: int, chars: list[Char], start: str, end: str, split: float | None) -> list[Line]:
+    """``chars`` (in reading order) as one line, or with ``split`` as one line per stretch between
+    gaps wider than it; the gap is measured between characters that are not spaces."""
+    pieces: list[list[Char]] = [[]]
+    last: Char | None = None
+    for c in chars:
+        if not c["text"].strip():
+            pieces[-1].append(c)
+            continue
+        if split is not None and last is not None and c[start] - last[end] > split:
+            pieces.append([])
+        pieces[-1].append(c)
+        last = c
+    return [ln for piece in pieces if (ln := _line(page, piece, start, end)) is not None]
 
 
 def _line(page: int, chars: list[Char], start: str, end: str) -> Line | None:

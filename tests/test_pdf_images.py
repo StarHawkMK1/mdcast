@@ -136,6 +136,7 @@ def test_image_in_table_outline_but_no_cell_is_body():
         chars: list[dict] = field(default_factory=list)
         height: float = 842.0
         bbox: tuple[float, float, float, float] = (0, 0, 595, 842)
+        curves: tuple[dict, ...] = ()
 
         def find_tables(self) -> list[FakeTable]:
             return self.tables
