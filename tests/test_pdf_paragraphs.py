@@ -83,6 +83,7 @@ def test_join_text_spacing():
     assert join_text("well-", "known") == "well-known"
     assert join_text("A -", "B") == "A - B"
     assert join_text("가-", "나") == "가- 나"
+    assert join_text("opine­", "mur") == "opine­mur"  # hyphenated at the line end: soft hyphen kept
 
 
 def test_bold_runs_become_strong():
@@ -142,6 +143,26 @@ def test_typst_paragraphs_and_bold():
     strong = [e for e in first.content if isinstance(e, pf.Strong)]
     assert [pf.stringify(e) for e in strong] == ["Bold"]
     assert pf.stringify(back.content[1]).strip() == "Second paragraph here."
+
+
+HYPHENATED = (
+    "Extraordinarily comprehensive internationalization considerations notwithstanding, "
+    "implementations characteristically demonstrate unquestionable interoperability. "
+) * 6
+
+
+def test_typst_hyphenated_words_join_up():
+    """typst hyphenates justified text with a soft hyphen in the text layer: the word joins up, no space."""
+    data = typst_pdf(
+        '#set par(justify: true)\n#set text(lang: "en", hyphenate: true)\n' + HYPHENATED,
+        page="width: 8cm, height: auto, margin: 1cm",
+    )
+    with pdfplumber.open(io.BytesIO(data)) as pdf:
+        assert "­" in "".join(c["text"] for c in pdf.pages[0].chars)  # typst did hyphenate
+    result = convert(Source(data, "a.pdf", Format.PDF), [Format.MD])
+    assert result.report.coverage == 1.0
+    back = read_md(Source(result.outputs[0].data, "a.md", Format.MD), Report("a.md", Format.MD)).doc
+    assert pf.stringify(back).strip().replace("­", "") == HYPHENATED.strip()
 
 
 def test_image_only_pdf_does_not_fail():

@@ -59,12 +59,21 @@ def starts_block(text: str) -> bool:
     return list_marker(text) is not None or heading_shape(text) is not None or text.startswith("※")
 
 
+SOFT_HYPHEN = "­"  # typst (and others) write a hyphenation break into the text layer as this
+
+
 def join_text(prev: str, nxt: str) -> str:
-    """Two lines of one paragraph: an English word broken after ``-`` keeps it and joins up, else one space."""
+    """Two lines of one paragraph: an English word broken after ``-`` keeps it and joins up, else one space.
+
+    A word hyphenated at the line end (soft hyphen) joins up too; the soft hyphen stays, so no
+    character is lost and it is invisible in the MD.
+    """
     return prev + nxt if _glued(prev, nxt) else f"{prev} {nxt}"
 
 
 def _glued(prev: str, nxt: str) -> bool:
+    if prev.endswith(SOFT_HYPHEN):
+        return bool(nxt)
     return len(prev) >= 2 and prev[-1] == "-" and _ascii_letter(prev[-2]) and bool(nxt) and _ascii_letter(nxt[0])
 
 
