@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import itertools
 import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -17,6 +16,8 @@ from mdcast.readers.pdf.model import Box
 SNAP = 1.0  # pt. Cell edges this close lie on one grid line
 SPAN_ROW_REACH = 2.0  # a full-width row joins a stack when no taller than this many of its tallest rows
 FIT_SLACK = 2.0  # pt. A full-width row may leave this much more room around its text than the tightest row
+# Accepted limit: between two open-sided tables whose rows all sit loosely around their text, a
+# paragraph that fits as tightly reads as a full-width row and joins them (its text is kept).
 
 Edge = Mapping[str, Any]  # a pdfplumber edge: x0, x1, top, bottom, orientation ("h" or "v")
 
@@ -78,9 +79,9 @@ def open_sides(edges: Sequence[Edge], chars: Sequence[Box]) -> list[dict[str, An
         end = "x0" if left else "x1"
         for group in _meeting(rules, end):
             x = min(r["x0"] for r in group) if left else max(r["x1"] for r in group)
-            for stack in _stacks(group, uprights, chars, x, left):
-                if any(_text_outside(a, b, uprights, chars, x, left) for a, b in itertools.pairwise(stack)):
-                    sides.append(_upright(x, stack[0]["top"], stack[-1]["top"]))
+            for run in _stacks(group, uprights, chars, x, left):
+                if run.open:
+                    sides.append(_upright(x, run.rules[0]["top"], run.rules[-1]["top"]))
     return sides
 
 
@@ -100,26 +101,35 @@ class _Run:
     rules: list[Edge]
     tallest: float = 0.0  # the tallest row a real vertical rule joins; 0 for a lone rule
     slack: float = math.inf  # the least row height left over by its text, over those rows with text
+    open: bool = False  # text lies outside its outermost vertical rules: its side is missing
+
+    @property
+    def mergeable(self) -> bool:
+        """A lone rule, or an open run with text, may join across a row with no vertical rule."""
+        return len(self.rules) == 1 or (self.open and self.slack < math.inf)
 
 
 def _stacks(
     group: Sequence[Edge], uprights: Sequence[Edge], chars: Sequence[Box], x: float, left: bool
-) -> list[list[Edge]]:
-    """``group`` top to bottom in stacks of two or more rules.
+) -> list[_Run]:
+    """``group`` top to bottom in runs of two or more rules, each judged open or not.
 
-    A rule joins the one above when a real vertical rule inside runs between them. A row with no
-    vertical inside (a cell across every column) joins a neighbouring stack when (:func:`_abut`)
-    its rules have both of the stack's ends, within SNAP, it is at most SPAN_ROW_REACH times the
-    stack's tallest row high, and it holds text as tightly as the stack's tightest row (within
-    FIT_SLACK). A paragraph between two tables sits in the space around them, so that gap stays
-    out. A lone pair of rules never forms a stack, so it never becomes a table.
+    A rule joins the one above when a real vertical rule inside runs between them. A run is open
+    when one of its rows has text outside its outermost vertical rule (:func:`_text_outside`).
+    A row with no vertical inside (a cell across every column) joins its neighbours into one run
+    when (:func:`_abut`) each neighbour is open with text of its own or a lone rule, its rules have
+    both of their ends, within SNAP, it is at most SPAN_ROW_REACH times their tallest row high, and
+    it holds text as tightly as their tightest row (within FIT_SLACK). Closed tables never join:
+    their own full-width rows lie within their side rules already, and a paragraph between two of
+    them stays a paragraph. A lone pair of rules never forms a run, so it never becomes a table.
     """
     runs: list[_Run] = []
     for rule in sorted(group, key=lambda r: r["top"]):
         if runs and _joined(runs[-1].rules[-1], rule, uprights, x, left):
-            run = runs[-1]
-            run.tallest = max(run.tallest, rule["top"] - run.rules[-1]["top"])
-            run.slack = min(run.slack, _slack(run.rules[-1], rule, chars))
+            run, above = runs[-1], runs[-1].rules[-1]
+            run.tallest = max(run.tallest, rule["top"] - above["top"])
+            run.slack = min(run.slack, _slack(above, rule, chars))
+            run.open = run.open or _text_outside(above, rule, uprights, chars, x, left)
             run.rules.append(rule)
         else:
             runs.append(_Run([rule]))
@@ -128,11 +138,11 @@ def _stacks(
         upper, lower = runs[i], runs[i + 1]
         if _abut(upper, lower, chars):
             tallest, slack = max(upper.tallest, lower.tallest), min(upper.slack, lower.slack)
-            runs[i : i + 2] = [_Run(upper.rules + lower.rules, tallest, slack)]
+            runs[i : i + 2] = [_Run(upper.rules + lower.rules, tallest, slack, open=True)]
             i = max(i - 1, 0)
         else:
             i += 1
-    return [run.rules for run in runs if len(run.rules) > 1]
+    return [run for run in runs if len(run.rules) > 1]
 
 
 def _abut(upper: _Run, lower: _Run, chars: Sequence[Box]) -> bool:
@@ -140,7 +150,9 @@ def _abut(upper: _Run, lower: _Run, chars: Sequence[Box]) -> bool:
     reach = SPAN_ROW_REACH * max(upper.tallest, lower.tallest)
     above, below = upper.rules[-1], lower.rules[0]
     return (
-        reach > 0
+        reach > 0  # one of them has rows
+        and upper.mergeable
+        and lower.mergeable
         and abs(above["x0"] - below["x0"]) <= SNAP
         and abs(above["x1"] - below["x1"]) <= SNAP
         and below["top"] - above["top"] <= reach

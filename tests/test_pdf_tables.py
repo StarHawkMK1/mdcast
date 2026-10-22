@@ -246,6 +246,23 @@ def test_paragraph_between_open_sided_tables_stays_between():
     assert texts(found)[1] == "사이 문단 한 줄"
 
 
+@pytest.mark.parametrize("inset", [5, 14])
+def test_paragraph_between_ruled_tables_stays_between(inset):
+    # closed tables never join across a row with no vertical rule, however tight or loose their rows
+    two = f"#table(columns: 3, inset: {inset}pt, {_ROW_A}, {_ROW_B})"
+    found = blocks(f"{_BODY}\n\n{two}\n\n사이 문단 한 줄\n\n{two}")
+    assert [type(b) for b in found] == [pf.Para, pf.Table, pf.Para, pf.Table]
+    assert texts(found)[1] == "사이 문단 한 줄"
+
+
+def test_paragraph_between_empty_grids_stays_between():
+    # blank form sections: ruled grids with no text in them
+    empty = "#table(columns: (3cm, 3cm, 3cm), rows: 18pt, [], [], [], [], [], [])"
+    found = blocks(f"{_BODY}\n\n{empty}\n\n사이 문단 한 줄\n\n{empty}")
+    assert [type(b) for b in found] == [pf.Para, pf.Table, pf.Para, pf.Table]
+    assert texts(found)[1] == "사이 문단 한 줄"
+
+
 def test_two_rules_around_text_are_no_table():
     found = blocks(f"#line(length: 100%)\n\n{_BODY}\n\n#line(length: 100%)")
     assert not tables(found)
@@ -288,6 +305,21 @@ def test_open_sides_leaves_ruled_tables_alone(overhang):
     rules = [_rule(0, 300, y) for y in (100, 120, 140)]
     sides = [_upright(overhang, 100, 140), _upright(150, 100, 140), _upright(300 - overhang, 100, 140)]
     assert open_sides([*rules, *sides], [_glyph(overhang + 20, 110), _glyph(250, 130)]) == []
+
+
+def test_open_sides_never_join_closed_tables():
+    # two ruled tables of 30pt rows, side rules 2pt in, one paragraph glyph in the gap between them
+    rules = [_rule(0, 300, y) for y in (100, 130, 160, 190, 220, 250)]
+    first = [_upright(2, 100, 160), _upright(150, 100, 160), _upright(298, 100, 160)]
+    second = [_upright(2, 190, 250), _upright(150, 190, 250), _upright(298, 190, 250)]
+    cells = [_glyph(50, 115), _glyph(200, 145), _glyph(50, 205), _glyph(200, 235)]
+    assert open_sides([*rules, *first, *second], [*cells, _glyph(100, 175)]) == []
+
+
+def test_open_sides_never_join_textless_runs():
+    rules = [_rule(0, 300, y) for y in (100, 120, 140, 160, 180, 200)]
+    inner = [_upright(150, 100, 140), _upright(150, 160, 200)]  # open sides, no text in the cells
+    assert open_sides([*rules, *inner], [_glyph(100, 150)]) == []
 
 
 def test_full_width_row_far_below_stays_out():
