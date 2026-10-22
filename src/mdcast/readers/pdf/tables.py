@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -16,8 +17,13 @@ from mdcast.readers.pdf.model import Box
 SNAP = 1.0  # pt. Cell edges this close lie on one grid line
 SPAN_ROW_REACH = 2.0  # a full-width row joins a stack when no taller than this many of its tallest rows
 FIT_SLACK = 2.0  # pt. A full-width row may leave this much more room around its text than the tightest row
-# Accepted limit: between two open-sided tables whose rows all sit loosely around their text, a
-# paragraph that fits as tightly reads as a full-width row and joins them (its text is kept).
+# Accepted limits (text is kept in each, as body text or as a row):
+# - between two open-sided tables whose rows all sit loosely around their text, a paragraph that
+#   fits as tightly reads as a full-width row and joins them;
+# - a lone full-width rule (a separator line) next to an open-sided table can take in a tight
+#   paragraph beside it as one more row;
+# - an open-sided table split by a full-width row, where the rows on one side of it have both
+#   outer columns empty, stays two tables with that row as body text between them.
 
 Edge = Mapping[str, Any]  # a pdfplumber edge: x0, x1, top, bottom, orientation ("h" or "v")
 
@@ -79,8 +85,8 @@ def open_sides(edges: Sequence[Edge], chars: Sequence[Box]) -> list[dict[str, An
         end = "x0" if left else "x1"
         for group in _meeting(rules, end):
             x = min(r["x0"] for r in group) if left else max(r["x1"] for r in group)
-            for run in _stacks(group, uprights, chars, x, left):
-                if run.open:
+            for run in _stacks(group, uprights, chars, x, left):  # this side, judged on all its rows
+                if any(_text_outside(a, b, uprights, chars, x, left) for a, b in itertools.pairwise(run.rules)):
                     sides.append(_upright(x, run.rules[0]["top"], run.rules[-1]["top"]))
     return sides
 
@@ -101,7 +107,7 @@ class _Run:
     rules: list[Edge]
     tallest: float = 0.0  # the tallest row a real vertical rule joins; 0 for a lone rule
     slack: float = math.inf  # the least row height left over by its text, over those rows with text
-    open: bool = False  # text lies outside its outermost vertical rules: its side is missing
+    open: bool = False  # a row has text outside its outermost vertical rules: a side is missing
 
     @property
     def mergeable(self) -> bool:
@@ -115,11 +121,13 @@ def _stacks(
     """``group`` top to bottom in runs of two or more rules, each judged open or not.
 
     A rule joins the one above when a real vertical rule inside runs between them. A run is open
-    when one of its rows has text outside its outermost vertical rule (:func:`_text_outside`).
-    A row with no vertical inside (a cell across every column) joins its neighbours into one run
-    when (:func:`_abut`) each neighbour is open with text of its own or a lone rule, its rules have
-    both of their ends, within SNAP, it is at most SPAN_ROW_REACH times their tallest row high, and
-    it holds text as tightly as their tightest row (within FIT_SLACK). Closed tables never join:
+    when one of its rows has text outside its outermost vertical rule on either side
+    (:func:`_row_open`), so a run whose outer cells on this side are empty still counts when the
+    other side is missing. A row with no vertical inside (a cell across every column) joins its
+    neighbours into one run when (:func:`_abut`) each is open with text of its own or a lone rule,
+    its rules have both of their ends, within SNAP, it is at most SPAN_ROW_REACH times their
+    tallest row high, and it holds text as tightly as their tightest row (within FIT_SLACK).
+    Which sides then get a rule is judged per side on the joined run's rows. Closed tables never join:
     their own full-width rows lie within their side rules already, and a paragraph between two of
     them stays a paragraph. A lone pair of rules never forms a run, so it never becomes a table.
     """
@@ -129,7 +137,7 @@ def _stacks(
             run, above = runs[-1], runs[-1].rules[-1]
             run.tallest = max(run.tallest, rule["top"] - above["top"])
             run.slack = min(run.slack, _slack(above, rule, chars))
-            run.open = run.open or _text_outside(above, rule, uprights, chars, x, left)
+            run.open = run.open or _row_open(above, rule, uprights, chars)
             run.rules.append(rule)
         else:
             runs.append(_Run([rule]))
@@ -182,6 +190,14 @@ def _joined(upper: Edge, lower: Edge, uprights: Sequence[Edge], x: float, left: 
     else:
         lo, hi = max(upper["x0"], lower["x0"]) + SNAP, x - SNAP
     return any(lo < v["x0"] < hi and _spans(v, upper["top"], lower["top"]) for v in uprights)
+
+
+def _row_open(upper: Edge, lower: Edge, uprights: Sequence[Edge], chars: Sequence[Box]) -> bool:
+    """The row has text outside its outermost vertical rule on its left or its right side."""
+    left_end, right_end = min(upper["x0"], lower["x0"]), max(upper["x1"], lower["x1"])
+    return _text_outside(upper, lower, uprights, chars, left_end, True) or _text_outside(
+        upper, lower, uprights, chars, right_end, False
+    )
 
 
 def _text_outside(

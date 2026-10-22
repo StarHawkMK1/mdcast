@@ -238,6 +238,18 @@ def test_open_sided_table_keeps_its_full_width_row(cells, expected):
     assert convert(pdf_source(data), [Format.MD]).report.coverage == 1.0
 
 
+def test_full_width_row_joins_rows_with_an_empty_outer_column():
+    # below the full-width row the right-hand outer cells are empty: that side is still open above
+    lower = "[나 하나], [나 둘], [], [다 하나], [다 둘], []"
+    data = typst_pdf(f"{_BODY}\n\n#table(columns: 3, {_OPEN_SIDES}, {_ROW_A}, {_FULL}, {lower})")
+    found = list(read_pdf(pdf_source(data), Report("a.pdf", Format.PDF), "a_assets").doc.content)
+    assert [type(b) for b in found] == [pf.Para, pf.Table]
+    [table] = tables(found)
+    assert cell_texts(table) == [["가 하나", "가 둘", "가 셋"], ["가로 칸"], ["나 하나", "나 둘", ""], ["다 하나", "다 둘", ""]]
+    assert spans(table)[1] == [(1, 3)]
+    assert convert(pdf_source(data), [Format.MD]).report.coverage == 1.0
+
+
 def test_paragraph_between_open_sided_tables_stays_between():
     # the paragraph's rules are the tables' own and have their ends, but it sits in the room around them
     two = f"#table(columns: 3, {_OPEN_SIDES}, {_ROW_A}, {_ROW_B})"
