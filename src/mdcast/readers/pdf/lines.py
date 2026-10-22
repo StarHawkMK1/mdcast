@@ -24,7 +24,7 @@ def page_lines(page: int, chars: Sequence[Char], skip: Sequence[Box] = ()) -> li
     A character whose centre lies in a ``skip`` box is left out. Rotated characters (not
     ``upright``) are kept: they make lines of their own, read down a column.
     """
-    kept = [c for c in chars if not any(box.contains(*_centre(c)) for box in skip)]
+    kept = [c for c in chars if not any(box.contains(*centre(c)) for box in skip)]
     upright = [c for c in kept if c.get("upright", True)]
     rotated = [c for c in kept if not c.get("upright", True)]
     lines = [_line(page, group, "x0", "x1") for group in _groups(upright, "top", "x0")]
@@ -32,7 +32,7 @@ def page_lines(page: int, chars: Sequence[Char], skip: Sequence[Box] = ()) -> li
     return sorted((ln for ln in lines if ln is not None), key=lambda ln: (ln.box.top, ln.box.x0))
 
 
-def _centre(c: Char) -> tuple[float, float]:
+def centre(c: Char) -> tuple[float, float]:
     return (c["x0"] + c["x1"]) / 2, (c["top"] + c["bottom"]) / 2
 
 

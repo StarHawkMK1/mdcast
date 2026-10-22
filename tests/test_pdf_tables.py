@@ -1,0 +1,133 @@
+from __future__ import annotations
+
+import panflute as pf
+from pdf_builder import typst_pdf
+
+from mdcast.pipeline import convert
+from mdcast.readers.grid import Slot
+from mdcast.readers.md import read_md
+from mdcast.readers.pdf import read_pdf
+from mdcast.readers.pdf.model import Box
+from mdcast.readers.pdf.tables import PageTable, build_table
+from mdcast.report import Report
+from mdcast.types import Format, Source
+
+# a paragraph wrapping over several lines, so the layout is measured on real body text
+_BODY = "본문 글은 여러 줄에 걸쳐 이어지는 한 문단입니다. " * 8 + "끝."
+
+
+def pdf_source(data: bytes) -> Source:
+    return Source(data, "a.pdf", Format.PDF)
+
+
+def blocks(body: str) -> list[pf.Block]:
+    return list(read_pdf(pdf_source(typst_pdf(body)), Report("a.pdf", Format.PDF), "a_assets").doc.content)
+
+
+def tables(found: list[pf.Block]) -> list[pf.Table]:
+    return [b for b in found if isinstance(b, pf.Table)]
+
+
+def rows(table: pf.Table) -> list[pf.TableRow]:
+    return [*table.head.content, *(r for body in table.content for r in body.content)]
+
+
+def cell_texts(table: pf.Table) -> list[list[str]]:
+    return [[pf.stringify(cell).strip() for cell in row.content] for row in rows(table)]
+
+
+def spans(table: pf.Table) -> list[list[tuple[int, int]]]:
+    return [[(cell.rowspan, cell.colspan) for cell in row.content] for row in rows(table)]
+
+
+def texts(found: list[pf.Block]) -> list[str]:
+    return [pf.stringify(b).strip() for b in found if not isinstance(b, pf.Table)]
+
+
+def test_merged_cells_spans():
+    found = blocks("#table(columns: 3, table.cell(colspan: 2)[a], [b], [c], [d], [e])")
+    [table] = tables(found)
+    assert cell_texts(table) == [["a", "b"], ["c", "d", "e"]]
+    assert spans(table) == [[(1, 2), (1, 1)], [(1, 1), (1, 1), (1, 1)]]
+
+
+def test_rowspan():
+    found = blocks("#table(columns: 2, [h1], [h2], table.cell(rowspan: 2)[a], [b], [c])")
+    [table] = tables(found)
+    assert cell_texts(table) == [["h1", "h2"], ["a", "b"], ["c"]]
+    assert spans(table) == [[(1, 1), (1, 1)], [(2, 1), (1, 1)], [(1, 1)]]
+
+
+def test_first_row_is_head():
+    [table] = tables(blocks("#table(columns: 2, [h1], [h2], [a], [b])"))
+    assert [[pf.stringify(c).strip() for c in r.content] for r in table.head.content] == [["h1", "h2"]]
+    assert len(table.content) == 1 and len(table.content[0].content) == 1
+    assert pf.stringify(table.caption) == ""
+    assert table.colspec == [("AlignDefault", "ColWidthDefault")] * 2
+
+
+def test_table_text_not_in_body():
+    found = blocks("위 문단 글입니다.\n\n#table(columns: 2, [칸가], [칸나], [칸다], [칸라])\n\n아래 문단 글입니다.")
+    assert [type(b) for b in found] == [pf.Para, pf.Table, pf.Para]
+    assert texts(found) == ["위 문단 글입니다.", "아래 문단 글입니다."]
+    assert cell_texts(found[1]) == [["칸가", "칸나"], ["칸다", "칸라"]]
+
+
+def test_cell_paragraphs():
+    found = blocks(f"{_BODY}\n\n#table(columns: 2, [머리], [머리 둘], [첫 문단\n\n둘째 문단], [한 문단])")
+    [table] = tables(found)
+    two, one = table.content[0].content[0].content
+    assert [type(b) for b in two.content] == [pf.Para, pf.Para]
+    assert [pf.stringify(b).strip() for b in two.content] == ["첫 문단", "둘째 문단"]
+    assert [type(b) for b in one.content] == [pf.Plain]
+
+
+def test_cell_paragraphs_are_never_headings():
+    found = blocks("#table(columns: 2, [#text(size: 20pt)[큰 글]], [b], [c], [d])\n\n" + _BODY)
+    [table] = tables(found)
+    assert [type(b) for b in table.head.content[0].content[0].content] == [pf.Plain]
+    assert not [b for b in found if isinstance(b, pf.Header)]
+
+
+def test_one_cell_box_unwraps():
+    found = blocks(f"{_BODY}\n\n#block(stroke: 1pt, inset: 6pt)[상자 안 글]")
+    assert not tables(found)
+    assert "상자 안 글" in texts(found)
+
+
+def test_one_cell_table_gives_its_blocks_as_paras():
+    box = Box(0, 0, 100, 20)
+    table = PageTable(box, [Slot(box, 0, 0)])
+    out = build_table(table, lambda cell: [pf.Plain(pf.Str("상자"))])
+    assert [type(b) for b in out] == [pf.Para]
+    assert pf.stringify(out[0]).strip() == "상자"
+
+
+def test_one_by_two_box_stays_table():
+    [table] = tables(blocks("#table(columns: 2, [이름표], [긴 안내 글])"))
+    assert cell_texts(table) == [["이름표", "긴 안내 글"]]
+
+
+def test_borderless_table_is_text():
+    data = typst_pdf("#table(stroke: none, columns: 2, [칸가], [칸나], [칸다], [칸라])")
+    found = list(read_pdf(pdf_source(data), Report("a.pdf", Format.PDF), "a_assets").doc.content)
+    assert not tables(found)
+    assert all(t in " ".join(texts(found)) for t in ["칸가", "칸나", "칸다", "칸라"])
+    assert convert(pdf_source(data), [Format.MD]).report.coverage == 1.0
+
+
+def test_cell_text_in_source_text():
+    data = typst_pdf("위 글\n\n#table(columns: 2, [칸가], [칸나], [칸다], [칸라])\n\n아래 글")
+    source = read_pdf(pdf_source(data), Report("a.pdf", Format.PDF), "a_assets").source_text
+    assert source == ["위 글", "칸가", "칸나", "칸다", "칸라", "아래 글"]
+
+
+def test_merged_table_reads_back_from_md():
+    result = convert(pdf_source(typst_pdf("#table(columns: 3, table.cell(colspan: 2)[a], [b], [c], [d], [e])")),
+                     [Format.MD])
+    assert result.report.coverage == 1.0
+    back = read_md(Source(result.outputs[0].data, "a.md", Format.MD), Report("a.md", Format.MD)).doc
+    [table] = tables(list(back.content))
+    assert cell_texts(table) == [["a", "b"], ["c", "d", "e"]]
+    assert spans(table) == [[(1, 2), (1, 1)], [(1, 1), (1, 1), (1, 1)]]
+    assert len(table.head.content) == 1
