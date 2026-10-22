@@ -14,9 +14,9 @@ from mdcast.types import Format, Source
 BODY = 11.0
 
 
-def para(size: float, *texts: str, top: float = 100) -> list[Line]:
+def para(size: float, *texts: str, top: float = 100, page: int = 0) -> list[Line]:
     """A paragraph of one line per text, all at ``size``."""
-    return [Line(0, Box(70, top + i * size * 1.2, 300, top + i * size * 1.2 + size), size, [Run(t, False)])
+    return [Line(page, Box(70, top + i * size * 1.2, 300, top + i * size * 1.2 + size), size, [Run(t, False)])
             for i, t in enumerate(texts)]
 
 
@@ -30,6 +30,17 @@ def test_close_sizes_share_level():
     paragraphs = [para(20, "제목"), para(16.0, "장"), para(16.3, "다른 장"), para(14, "절")]
     sizes = heading_sizes(paragraphs, BODY)
     assert sizes == {20: 1, 16.3: 2, 16.0: 2, 14: 3}
+
+
+def test_first_page_title_stays_level_one():
+    # a divider on page 2 set larger than the page-1 title is level 1 beside it, not above it
+    paragraphs = [
+        para(BODY, "표지 앞 본문", page=0),  # no candidate on page 0: page 1 holds the title
+        para(18, "문서 제목", page=1), para(BODY, "본문", page=1), para(14, "1장", page=1),
+        para(24, "제2부", page=2), para(17.7, "부제", page=2), para(16, "2장", page=2), para(12.8, "절", page=2),
+    ]
+    sizes = heading_sizes(paragraphs, BODY)
+    assert sizes == {24: 1, 18: 1, 17.7: 1, 16: 2, 14: 3, 12.8: 4}
 
 
 def test_levels_stop_at_six():

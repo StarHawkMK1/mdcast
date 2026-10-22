@@ -24,12 +24,25 @@ def _candidate(paragraph: Sequence[Line], body_size: float) -> bool:
 
 
 def heading_sizes(paragraphs: Sequence[Sequence[Line]], body_size: float) -> dict[float, int]:
-    """The level (1..6) of every first-line size a heading candidate has; the largest is 1."""
+    """The level (1..6) of every first-line size a heading candidate has.
+
+    The largest candidate on the first page that has one is the document title: it and every
+    size within 0.5pt of it or larger are level 1, so a bigger divider later on does not push
+    the title down. Smaller sizes rank from 2, largest first.
+    """
+    candidates = [p for p in paragraphs if _candidate(p, body_size)]
+    if not candidates:
+        return {}
+    first_page = min(p[0].page for p in candidates)
+    anchor = max(p[0].size for p in candidates if p[0].page == first_page)
     sizes: dict[float, int] = {}
-    level = 0
-    top = 0.0  # the largest size of the current level
-    for size in sorted({p[0].size for p in paragraphs if _candidate(p, body_size)}, reverse=True):
-        if not level or top - size > _SAME_LEVEL:
+    level = 1
+    top = anchor  # the largest size of the current level
+    for size in sorted({p[0].size for p in candidates}, reverse=True):
+        if size >= anchor - _SAME_LEVEL:
+            sizes[size] = 1
+            continue
+        if level == 1 or top - size > _SAME_LEVEL:
             level += 1
             top = size
         sizes[size] = min(level, _MAX_LEVEL)
