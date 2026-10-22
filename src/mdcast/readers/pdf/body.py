@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 from collections.abc import Sequence
-from dataclasses import dataclass
 
 import panflute as pf
 import pdfplumber
@@ -21,7 +21,7 @@ from mdcast.report import Report
 Item = Line | PageTable  # what a page's flow holds
 
 
-@dataclass
+@dataclasses.dataclass
 class Page:
     number: int  # from 0
     lines: list[Line]  # the text lines outside tables
@@ -95,8 +95,12 @@ def read_body(pkg: PdfPackage, report: Report, assets: Assets) -> tuple[list[pf.
 
 
 def cell_blocks(page: Page, box: Box, layout: Layout) -> list[pf.Block]:
-    """A table cell's paragraphs: one is Plain, several are Para (M3b D1). A cell holds no headings."""
-    paragraphs = group_paragraphs(page.cells[box], layout)
+    """A table cell's paragraphs: one is Plain, several are Para (M3b D1). A cell holds no headings.
+
+    The document's body size and line gap apply, but a line ends short against the cell's own right
+    edge, so a sentence wrapping in a narrow cell stays one paragraph.
+    """
+    paragraphs = group_paragraphs(page.cells[box], dataclasses.replace(layout, right=box.x1))
     if len(paragraphs) == 1:
         return [pf.Plain(*to_inlines(paragraphs[0]))]
     return [pf.Para(*to_inlines(p)) for p in paragraphs]

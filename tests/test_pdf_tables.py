@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import io
+from dataclasses import dataclass
+
 import panflute as pf
+import pdfplumber
 from pdf_builder import typst_pdf
 
 from mdcast.pipeline import convert
 from mdcast.readers.grid import Slot
 from mdcast.readers.md import read_md
 from mdcast.readers.pdf import read_pdf
+from mdcast.readers.pdf.body import read_page
 from mdcast.readers.pdf.model import Box
 from mdcast.readers.pdf.tables import PageTable, build_table
 from mdcast.report import Report
@@ -14,6 +19,28 @@ from mdcast.types import Format, Source
 
 # a paragraph wrapping over several lines, so the layout is measured on real body text
 _BODY = "본문 글은 여러 줄에 걸쳐 이어지는 한 문단입니다. " * 8 + "끝."
+
+
+@dataclass
+class FakeTable:
+    bbox: tuple[float, float, float, float]
+    cells: list[tuple[float, float, float, float]]
+
+
+@dataclass
+class FakePage:
+    chars: list[dict]
+    tables: list[FakeTable]
+
+    def find_tables(self) -> list[FakeTable]:
+        return self.tables
+
+
+def word(text: str, x0: float, top: float, size: float = 10.0) -> list[dict]:
+    """pdfplumber-like chars, each as wide as it is tall."""
+    return [{"text": c, "fontname": "Body-Regular", "size": size, "upright": True,
+             "x0": x0 + i * size, "x1": x0 + (i + 1) * size, "top": top, "bottom": top + size}
+            for i, c in enumerate(text)]
 
 
 def pdf_source(data: bytes) -> Source:
@@ -82,6 +109,36 @@ def test_cell_paragraphs():
     assert [type(b) for b in one.content] == [pf.Plain]
 
 
+def test_wrapped_sentence_in_narrow_cell_is_one_paragraph():
+    sentence = "이 칸의 글은 좁은 칸 안에서 여러 줄로 감겨 내려가는 한 문단입니다."
+    data = typst_pdf(f"{_BODY}\n\n#table(columns: (4cm, 4cm), [머리], [둘], [{sentence}], [짧은 글])")
+    with pdfplumber.open(io.BytesIO(data)) as pdf:
+        page = read_page(0, pdf.pages[0])
+    assert max(len(lines) for lines in page.cells.values()) > 2  # the sentence does wrap in its cell
+    [table] = tables(list(read_pdf(pdf_source(data), Report("a.pdf", Format.PDF), "a_assets").doc.content))
+    cell = table.content[0].content[0].content[0]
+    assert [type(b) for b in cell.content] == [pf.Plain]
+    # Hangul may break inside a word, which joins with a space (spec §4.2, accepted loss)
+    assert pf.stringify(cell).replace(" ", "").strip() == sentence.replace(" ", "")
+
+
+def test_short_lines_in_wide_cell_stay_apart():
+    found = blocks(f"{_BODY}\n\n#table(columns: (12cm, 2cm), [머리], [둘], [이름 \\ 주소], [값])")
+    [table] = tables(found)
+    cell = table.content[0].content[0].content[0]
+    assert [type(b) for b in cell.content] == [pf.Para, pf.Para]
+    assert [pf.stringify(b).strip() for b in cell.content] == ["이름", "주소"]
+
+
+def test_char_in_table_outline_but_no_cell_stays_body_text():
+    # an L-shaped table: its outline is 0..100 × 0..40 but no cell covers 50..100 × 20..40
+    cells = [(0, 0, 50, 20), (50, 0, 100, 20), (0, 20, 50, 40)]
+    chars = [*word("가", 10, 5), *word("나", 60, 5), *word("다", 10, 25), *word("밖", 70, 25)]
+    page = read_page(0, FakePage(chars, [FakeTable((0, 0, 100, 40), cells)]))
+    assert [ln.text for ln in page.lines] == ["밖"]
+    assert sorted(ln.text for lines in page.cells.values() for ln in lines) == ["가", "나", "다"]
+
+
 def test_cell_paragraphs_are_never_headings():
     found = blocks("#table(columns: 2, [#text(size: 20pt)[큰 글]], [b], [c], [d])\n\n" + _BODY)
     [table] = tables(found)
@@ -90,9 +147,10 @@ def test_cell_paragraphs_are_never_headings():
 
 
 def test_one_cell_box_unwraps():
+    # pdfplumber does not report one-cell tables, so a ruled box's text stays body text in place
     found = blocks(f"{_BODY}\n\n#block(stroke: 1pt, inset: 6pt)[상자 안 글]")
-    assert not tables(found)
-    assert "상자 안 글" in texts(found)
+    assert [type(b) for b in found] == [pf.Para, pf.Para]
+    assert texts(found)[1] == "상자 안 글"
 
 
 def test_one_cell_table_gives_its_blocks_as_paras():
