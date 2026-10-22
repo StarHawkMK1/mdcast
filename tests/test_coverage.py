@@ -73,6 +73,20 @@ def test_footnote_mark_inside_a_sentence_does_not_split_it():
     assert not missing_events(r)
 
 
+def test_quoted_text_keeps_its_own_quote_marks():
+    # read_md (smart) reads 'a' and "a" as Quoted; pf.stringify alone gives "a" for both
+    r = make_report()
+    src = ["그는 'chaere,' 라고 했다", "‘홑’ 과 “겹”", '그리고 "겹" 따옴표']
+    md = "그는 'chaere,' 라고 했다\n\n‘홑’ 과 “겹”\n\n그리고 \"겹\" 따옴표\n"
+    assert measure_coverage(src, md, r) == 1.0
+    assert not missing_events(r)
+
+
+def test_quote_marks_still_have_to_match():
+    r = make_report()
+    assert measure_coverage(["'홑' 따옴표"], '"홑" 따옴표\n', r) < 1.0
+
+
 def test_empty_source_is_full():
     r = make_report()
     assert measure_coverage([], "무엇이든\n", r) == 1.0

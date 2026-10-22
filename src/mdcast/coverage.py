@@ -39,11 +39,16 @@ def _text_with_notes_apart(doc: pf.Doc) -> str:
 
     ``pf.stringify`` would put the note's text where its mark is, splitting the source paragraph
     (whose ``w:footnoteReference`` has no text) around it. Math is dropped the same way: the
-    source text has none of an equation's text (``m:t``), the MD has its TeX.
+    source text has none of an equation's text (``m:t``), the MD has its TeX. A quotation keeps its
+    own marks: ``pf.stringify`` would put ``"`` around a single-quoted one too (``'a'`` read with
+    ``smart``), so the source's ``'`` would not be found.
     """
     notes: list[str] = []
 
     def pull(elem: pf.Element, _doc: pf.Doc):
+        if isinstance(elem, pf.Quoted):
+            mark = "'" if elem.quote_type == "SingleQuote" else '"'
+            return pf.Span(pf.Str(mark), *elem.content, pf.Str(mark))
         if isinstance(elem, pf.Math):
             return []
         if isinstance(elem, pf.Note):
