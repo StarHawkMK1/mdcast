@@ -1,4 +1,4 @@
-"""Real-document import checks, local only (M3a §9, M3b §9).
+"""Real-document import checks, local only (M3a §9, M3b §9, M3c §7).
 
 The corpus holds personal data: assert numbers only and never print, save or snapshot its text.
 Every count is computed into plain ints first so a failure message shows numbers, not content.
@@ -365,4 +365,140 @@ def test_hwpx_product_spec_numbers():
         "headers": 50,
         "images": 13,
         "alt_not_default": 0,
+    })
+
+
+# --- pdf (M3c §7) --------------------------------------------------------------------------------
+
+_PAGE_NUMBER = re.compile(r"-\s*\d+\s*-")
+_PAGE_NUMBER_LINE = re.compile(r"\s*\\?-\s*\d+\s*-\s*")  # as the MD has it, escaped or not
+
+
+def _pdf_measure(data: bytes) -> dict[str, int]:
+    result = convert(Source(data, "x.pdf", Format.PDF), [Format.MD])
+    out, events = result.outputs[0], result.report.events
+    md = out.data
+    back = read_md(Source(md, "x.md", Format.MD), Report("x.md", Format.MD)).doc
+    cells = _all(back, pf.TableCell)
+    images = _all(back, pf.Image)
+    levels = [h.level for h in _all(back, pf.Header)]
+    texts = [pf.stringify(b).strip() for b in _all(back, (pf.Para, pf.Plain))]
+    counts = {
+        "coverage_permille": round((result.report.coverage or 0) * 1000),
+        "errors": sum(1 for e in events if e.level is Level.ERROR),
+        "warnings": sum(1 for e in events if e.level is Level.WARN),
+        "multicolumn": sum(1 for e in events if e.code == Codes.PDF_MULTICOLUMN_SUSPECTED),
+        "scanned": sum(1 for e in events if e.code == Codes.PDF_SCANNED_SUSPECTED),
+        # the vector-drawing warning; the same code at info level counts dropped decorations
+        "vector": sum(1 for e in events if e.code == Codes.IMPORT_OBJECT_SKIPPED and e.level is Level.WARN),
+        "header_skipped": sum(1 for e in events if e.code == Codes.IMPORT_HEADER_SKIPPED),
+        "header_lines_skipped": _event_number(events, Codes.IMPORT_HEADER_SKIPPED),
+        "page_number_paras": sum(1 for t in texts if _PAGE_NUMBER.fullmatch(t)),
+        "page_number_lines": sum(1 for ln in md.decode("utf-8").splitlines() if _PAGE_NUMBER_LINE.fullmatch(ln)),
+        "tables": len(_all(back, pf.Table)),
+        "rowspan": sum(c.rowspan > 1 for c in cells),
+        "colspan": sum(c.colspan > 1 for c in cells),
+        "rowspan_sum": sum(c.rowspan for c in cells if c.rowspan > 1),
+        "colspan_sum": sum(c.colspan for c in cells if c.colspan > 1),
+        "images": len(images),
+        "image_files": len({i.url for i in images}),
+        "assets": len(out.assets),
+        "headers": len(levels),
+        **{f"h{n}": levels.count(n) for n in range(1, 7)},
+        "headings_inferred": _event_number(events, Codes.IMPORT_HEADING_INFERRED),
+        "list_items": len(_all(back, pf.ListItem)),
+        "lists_inferred": _event_number(events, Codes.IMPORT_LIST_INFERRED),
+    }
+    counts["docx_ok"], counts["docx_errors"] = _reexport(md, out.assets, Format.DOCX)
+    counts["hwpx_ok"], counts["hwpx_errors"] = _reexport(md, out.assets, Format.HWPX)
+    return counts
+
+
+def _pdf_counts(pattern: str) -> dict[str, int]:
+    data = _find(pattern).read_bytes()
+    try:
+        with _quiet():
+            return _pdf_measure(data)
+    except Exception as exc:  # noqa: BLE001 - keep document text out of the failure message
+        raise AssertionError(f"corpus import raised {type(exc).__name__}") from None
+
+
+_EVERY_PDF = {
+    "coverage_permille": 1000,
+    "errors": 0,
+    "warnings": 0,
+    "multicolumn": 0,
+    "scanned": 0,
+    "vector": 0,
+    "page_number_paras": 0,
+    "page_number_lines": 0,
+    "docx_ok": 1,
+    "docx_errors": 0,
+    "hwpx_ok": 1,
+    "hwpx_errors": 0,
+}
+
+
+def test_pdf_notice_corpus():
+    """공고문 (11 pages): the ``- n -`` page number goes from all 11 pages; 28 ruled tables, no pictures.
+
+    The tables are those pdfplumber finds per page (1, 2, 2, 6, 2, 1, 3, 4, 5, 1, 1; the 2×1 boxes
+    of pages 4, 8 and 9 among them), colspans on pages 2, 5, 6 and 10. Nine tables on pages 3, 5, 7,
+    10 and 11 have no outer left/right rules: their body rows' outer cells are not found, so their
+    text follows the table as body text and the 5 visible rowspans of pages 5 and 10 are not counted.
+    """
+    counts = _pdf_counts("*공고문*.pdf")
+    _check(counts, {
+        **_EVERY_PDF,
+        "header_skipped": 1,
+        "header_lines_skipped": 11,
+        "tables": 28,
+        "rowspan": 0,
+        "colspan": 4,
+        "rowspan_sum": 0,
+        "colspan_sum": 8,
+        "images": 0,
+        "image_files": 0,
+        "assets": 0,
+        "headers": 3,
+        "h1": 1,  # the title, page 1
+        "h2": 2,  # pages 5 and 10, from number shape
+        "h3": 0,
+        "h4": 0,
+        "h5": 0,
+        "h6": 0,
+        "headings_inferred": 2,
+        "list_items": 46,
+        "lists_inferred": 46,
+    })
+
+
+def test_pdf_guide_corpus():
+    """규격서 가이드 (11 pages): 26 ruled tables, 3 pictures on page 6 (two the same icon: 2 files).
+
+    Tables per page 1, 1, 2, 3, 6, 3, 1, 2, 2, 2, 3; rowspans on pages 1, 2, 4, 5 and 10 and
+    colspans on pages 4 and 10 as the pages show them.
+    """
+    counts = _pdf_counts("*규격서 가이드*.pdf")
+    _check(counts, {
+        **_EVERY_PDF,
+        "header_skipped": 0,
+        "tables": 26,
+        "rowspan": 14,
+        "colspan": 2,
+        "rowspan_sum": 37,
+        "colspan_sum": 6,
+        "images": 3,
+        "image_files": 2,
+        "assets": 2,
+        "headers": 5,
+        "h1": 1,  # the title, page 1
+        "h2": 2,  # h2, h3 and h4: large cover lines, all on page 3
+        "h3": 1,
+        "h4": 1,
+        "h5": 0,
+        "h6": 0,
+        "headings_inferred": 0,
+        "list_items": 64,
+        "lists_inferred": 64,
     })
