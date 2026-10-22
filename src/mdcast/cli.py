@@ -123,7 +123,7 @@ def convert(input_path, to, template, out_dir, as_json, verbose, quiet, keep_tem
     try:
         source_format = Format.from_filename(input_path.name)
     except ValueError:
-        raise click.UsageError(f"지원하지 않는 입력 형식: {input_path.name} (.md, .docx, .hwpx 파일을 지정하세요)") from None
+        raise click.UsageError(f"지원하지 않는 입력 형식: {input_path.name} (.md, .docx, .hwpx, .pdf 파일을 지정하세요)") from None
     if to is None:
         to = "docx" if source_format is Format.MD else "md"
     targets = []

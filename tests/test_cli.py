@@ -297,7 +297,7 @@ def test_other_input_names_the_supported_kinds(env):
     path = env / "a.txt"
     path.write_text("x", encoding="utf-8")
     r = run("convert", str(path))
-    assert r.exit_code == 2 and "(.md, .docx, .hwpx 파일을 지정하세요)" in r.output
+    assert r.exit_code == 2 and "(.md, .docx, .hwpx, .pdf 파일을 지정하세요)" in r.output
 
 
 def test_convert_help_names_hwpx_and_pdf_import(env):
