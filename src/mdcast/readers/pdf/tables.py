@@ -24,9 +24,25 @@ def find_tables(page: pdfplumber.page.Page) -> list[PageTable]:
     """The tables pdfplumber finds from the page's ruling lines (its default ``lines`` strategy).
 
     Borderless tables are not looked for: their text stays body text. pdfplumber leaves out a
-    table of a single cell, so a lone ruled box is body text too.
+    table of a single cell, so a lone ruled box is body text too. A table drawn inside another's
+    cell is left out as well: its text is the outer cell's (spec §4.4).
     """
-    return [_table(Box(*found.bbox), found.cells) for found in page.find_tables()]
+    kept: list[PageTable] = []
+    found = [_table(Box(*t.bbox), t.cells) for t in page.find_tables()]
+    for table in sorted(found, key=lambda t: t.box.width * t.box.height, reverse=True):  # outer first
+        if not any(_inside(table.box, outer.box) for outer in kept):
+            kept.append(table)
+    return kept
+
+
+def _inside(inner: Box, outer: Box) -> bool:
+    """``inner`` lies within ``outer``, give or take SNAP."""
+    return (
+        inner.x0 >= outer.x0 - SNAP
+        and inner.top >= outer.top - SNAP
+        and inner.x1 <= outer.x1 + SNAP
+        and inner.bottom <= outer.bottom + SNAP
+    )
 
 
 def _table(box: Box, cells: list[tuple[float, float, float, float]]) -> PageTable:

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 import panflute as pf
 import pdfplumber
+import pytest
 from pdf_builder import typst_pdf
 
 from mdcast.pipeline import convert
@@ -189,3 +190,14 @@ def test_merged_table_reads_back_from_md():
     assert cell_texts(table) == [["a", "b"], ["c", "d", "e"]]
     assert spans(table) == [[(1, 2), (1, 1)], [(1, 1), (1, 1), (1, 1)]]
     assert len(table.head.content) == 1
+
+
+@pytest.mark.parametrize("inset", ["", "inset: (left: 0pt, rest: 5pt), "], ids=["inset", "flush-left"])
+def test_nested_table_is_text_of_the_outer_cell(inset):
+    # pdfplumber reports a table drawn inside a cell as a table of its own beside the outer one
+    data = typst_pdf(f"#table(columns: 2, {inset}[바깥 가], [바깥 나], "
+                     "[#table(columns: 2, [안 가], [안 나])], [바깥 라])")
+    found = list(read_pdf(pdf_source(data), Report("a.pdf", Format.PDF), "a_assets").doc.content)
+    [table] = tables(found)
+    assert cell_texts(table) == [["바깥 가", "바깥 나"], ["안 가 안 나", "바깥 라"]]
+    assert convert(pdf_source(data), [Format.MD]).report.coverage == 1.0
