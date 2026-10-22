@@ -214,6 +214,38 @@ def test_open_sided_table_keeps_its_outer_cells():
     assert convert(pdf_source(data), [Format.MD]).report.coverage == 1.0
 
 
+_FULL = "table.cell(colspan: 3)[가로 칸]"
+_ROW_A, _ROW_B = "[가 하나], [가 둘], [가 셋]", "[나 하나], [나 둘], [나 셋]"
+
+
+@pytest.mark.parametrize(
+    ("cells", "expected"),
+    [
+        (f"{_ROW_A}, {_ROW_B}, {_FULL}", [["가 하나", "가 둘", "가 셋"], ["나 하나", "나 둘", "나 셋"], ["가로 칸"]]),
+        (f"{_FULL}, {_ROW_A}, {_ROW_B}", [["가로 칸"], ["가 하나", "가 둘", "가 셋"], ["나 하나", "나 둘", "나 셋"]]),
+        (f"{_ROW_A}, {_FULL}, {_ROW_B}", [["가 하나", "가 둘", "가 셋"], ["가로 칸"], ["나 하나", "나 둘", "나 셋"]]),
+    ],
+    ids=["last", "first", "middle"],
+)
+def test_open_sided_table_keeps_its_full_width_row(cells, expected):
+    data = typst_pdf(f"{_BODY}\n\n#table(columns: 3, {_OPEN_SIDES}, {cells})")
+    found = list(read_pdf(pdf_source(data), Report("a.pdf", Format.PDF), "a_assets").doc.content)
+    assert [type(b) for b in found] == [pf.Para, pf.Table]  # nothing after or between the table's rows
+    [table] = tables(found)
+    assert cell_texts(table) == expected
+    row = expected.index(["가로 칸"])
+    assert spans(table)[row] == [(1, 3)]
+    assert convert(pdf_source(data), [Format.MD]).report.coverage == 1.0
+
+
+def test_paragraph_between_open_sided_tables_stays_between():
+    # the paragraph's rules are the tables' own and have their ends, but it sits in the room around them
+    two = f"#table(columns: 3, {_OPEN_SIDES}, {_ROW_A}, {_ROW_B})"
+    found = blocks(f"{_BODY}\n\n{two}\n\n사이 문단 한 줄\n\n{two}")
+    assert [type(b) for b in found] == [pf.Para, pf.Table, pf.Para, pf.Table]
+    assert texts(found)[1] == "사이 문단 한 줄"
+
+
 def test_two_rules_around_text_are_no_table():
     found = blocks(f"#line(length: 100%)\n\n{_BODY}\n\n#line(length: 100%)")
     assert not tables(found)
@@ -228,19 +260,41 @@ def _upright(x: float, top: float, bottom: float) -> dict:
     return {"orientation": "v", "x0": x, "x1": x, "top": top, "bottom": bottom}
 
 
+def _glyph(x: float, y: float) -> Box:
+    """A 6pt character centred on (x, y)."""
+    return Box(x - 3, y - 3, x + 3, y + 3)
+
+
+_CELL_TEXT = [_glyph(50, 110), _glyph(150, 110), _glyph(250, 130)]  # in the outer and middle columns
+
+
 def test_open_sides_spans_only_the_stack():
     rules = [_rule(0, 300, y) for y in (100, 120, 140)]
     inner = [_upright(100, 100, 140), _upright(200, 100, 140)]
     unrelated = [_rule(0, 300, 400), _rule(0, 300, 420)]  # the same ends, but nothing joins them
-    sides = open_sides([*rules, *inner, *unrelated])
+    sides = open_sides([*rules, *inner, *unrelated], [*_CELL_TEXT, _glyph(50, 410)])
     assert sorted((s["x0"], s["top"], s["bottom"]) for s in sides) == [(0, 100, 140), (300, 100, 140)]
 
 
-def test_open_sides_leaves_ruled_tables_alone():
-    # the row rules overhang the side rules by 2pt, as the corpus's fully ruled tables do
+def test_open_sides_needs_text_outside_the_rules():
     rules = [_rule(0, 300, y) for y in (100, 120, 140)]
-    sides = [_upright(2, 100, 140), _upright(150, 100, 140), _upright(298, 100, 140)]
-    assert open_sides([*rules, *sides]) == []
+    inner = [_upright(100, 100, 140), _upright(200, 100, 140)]
+    assert open_sides([*rules, *inner], [_glyph(150, 110)]) == []  # nothing in the outer columns to rescue
+
+
+@pytest.mark.parametrize("overhang", [2, 5, 12])
+def test_open_sides_leaves_ruled_tables_alone(overhang):
+    # row rules that overhang the side rules (2pt in the corpus) leave nothing outside the cells
+    rules = [_rule(0, 300, y) for y in (100, 120, 140)]
+    sides = [_upright(overhang, 100, 140), _upright(150, 100, 140), _upright(300 - overhang, 100, 140)]
+    assert open_sides([*rules, *sides], [_glyph(overhang + 20, 110), _glyph(250, 130)]) == []
+
+
+def test_full_width_row_far_below_stays_out():
+    rules = [_rule(0, 300, y) for y in (100, 120, 140, 200)]  # the last row is 60pt: over 2 × 20pt
+    inner = [_upright(100, 100, 140), _upright(200, 100, 140)]
+    sides = open_sides([*rules, *inner], [*_CELL_TEXT, _glyph(150, 170)])
+    assert sorted((s["x0"], s["top"], s["bottom"]) for s in sides) == [(0, 100, 140), (300, 100, 140)]
 
 
 @pytest.mark.parametrize("inset", ["", "inset: (left: 0pt, rest: 5pt), "], ids=["inset", "flush-left"])

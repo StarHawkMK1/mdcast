@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import itertools
+import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -13,7 +15,8 @@ from mdcast.readers.grid import Slot, filled, grow_head, squeeze
 from mdcast.readers.pdf.model import Box
 
 SNAP = 1.0  # pt. Cell edges this close lie on one grid line
-OPEN_SIDE = 3.0  # pt. A side rule further in than this from the row rules' ends leaves the side open
+SPAN_ROW_REACH = 2.0  # a full-width row joins a stack when no taller than this many of its tallest rows
+FIT_SLACK = 2.0  # pt. A full-width row may leave this much more room around its text than the tightest row
 
 Edge = Mapping[str, Any]  # a pdfplumber edge: x0, x1, top, bottom, orientation ("h" or "v")
 
@@ -33,7 +36,9 @@ def find_tables(page: pdfplumber.page.Page) -> list[PageTable]:
     its outer left or right rule is closed first (:func:`open_sides`).
     """
     kept: list[PageTable] = []
-    sides = open_sides(_ruling(e for e in page.edges if e["object_type"] != "curve_edge"))  # rules, not drawings
+    rules = _ruling(e for e in page.edges if e["object_type"] != "curve_edge")  # rules, not drawings
+    chars = [Box(c["x0"], c["top"], c["x1"], c["bottom"]) for c in page.chars if c["text"].strip()]
+    sides = open_sides(rules, chars)
     found_tables = page.find_tables({"explicit_vertical_lines": sides}) if sides else page.find_tables()
     found = [_table(Box(*t.bbox), t.cells) for t in found_tables]
     for table in sorted(found, key=lambda t: t.box.width * t.box.height, reverse=True):  # outer first
@@ -55,15 +60,16 @@ def _ruling(edges: Iterable[Edge]) -> list[Edge]:
     return pdfplumber.utils.filter_edges(merged, min_length=s.edge_min_length)
 
 
-def open_sides(edges: Sequence[Edge]) -> list[dict[str, Any]]:
+def open_sides(edges: Sequence[Edge], chars: Sequence[Box]) -> list[dict[str, Any]]:
     """Vertical edges that close tables drawn without their outer left or right rule.
 
     Korean public documents often leave a table's sides open: the row rules run out to where the
     side rule would be, but no rule is drawn there, so pdfplumber finds no cell in the outer
-    columns. Row rules whose left (or right) ends meet within SNAP form a stack while a real
-    vertical rule inside joins each one to the next; a stack of two or more rules with no side
-    rule within OPEN_SIDE of those ends gets one from its top rule to its bottom rule. A lone pair
-    of rules with no vertical between them never forms a stack, so it never becomes a table.
+    columns. Row rules whose left (or right) ends meet within SNAP form a stack (:func:`_stacks`).
+    A stack is open when the centre of a character (``chars``: their boxes) lies between the
+    rules' ends and the outermost vertical rule of one of its rows: that text would fall out of
+    the table. An open stack gets one side edge from its top rule to its bottom rule. A closed
+    table, however far its rules overhang its side rules, has nothing there and gets none.
     """
     rules = [e for e in edges if e["orientation"] == "h"]
     uprights = [e for e in edges if e["orientation"] == "v"]
@@ -72,10 +78,9 @@ def open_sides(edges: Sequence[Edge]) -> list[dict[str, Any]]:
         end = "x0" if left else "x1"
         for group in _meeting(rules, end):
             x = min(r["x0"] for r in group) if left else max(r["x1"] for r in group)
-            for stack in _stacks(group, uprights, x, left):
-                top, bottom = stack[0]["top"], stack[-1]["top"]
-                if not any(abs(v["x0"] - x) <= OPEN_SIDE and _spans(v, top, bottom) for v in uprights):
-                    sides.append(_upright(x, top, bottom))
+            for stack in _stacks(group, uprights, chars, x, left):
+                if any(_text_outside(a, b, uprights, chars, x, left) for a, b in itertools.pairwise(stack)):
+                    sides.append(_upright(x, stack[0]["top"], stack[-1]["top"]))
     return sides
 
 
@@ -90,15 +95,72 @@ def _meeting(rules: Sequence[Edge], end: str) -> list[list[Edge]]:
     return groups
 
 
-def _stacks(group: Sequence[Edge], uprights: Sequence[Edge], x: float, left: bool) -> list[list[Edge]]:
-    """``group`` top to bottom, split where no vertical rule inside joins a rule to the next one."""
-    stacks: list[list[Edge]] = []
+@dataclass
+class _Run:
+    rules: list[Edge]
+    tallest: float = 0.0  # the tallest row a real vertical rule joins; 0 for a lone rule
+    slack: float = math.inf  # the least row height left over by its text, over those rows with text
+
+
+def _stacks(
+    group: Sequence[Edge], uprights: Sequence[Edge], chars: Sequence[Box], x: float, left: bool
+) -> list[list[Edge]]:
+    """``group`` top to bottom in stacks of two or more rules.
+
+    A rule joins the one above when a real vertical rule inside runs between them. A row with no
+    vertical inside (a cell across every column) joins a neighbouring stack when (:func:`_abut`)
+    its rules have both of the stack's ends, within SNAP, it is at most SPAN_ROW_REACH times the
+    stack's tallest row high, and it holds text as tightly as the stack's tightest row (within
+    FIT_SLACK). A paragraph between two tables sits in the space around them, so that gap stays
+    out. A lone pair of rules never forms a stack, so it never becomes a table.
+    """
+    runs: list[_Run] = []
     for rule in sorted(group, key=lambda r: r["top"]):
-        if stacks and _joined(stacks[-1][-1], rule, uprights, x, left):
-            stacks[-1].append(rule)
+        if runs and _joined(runs[-1].rules[-1], rule, uprights, x, left):
+            run = runs[-1]
+            run.tallest = max(run.tallest, rule["top"] - run.rules[-1]["top"])
+            run.slack = min(run.slack, _slack(run.rules[-1], rule, chars))
+            run.rules.append(rule)
         else:
-            stacks.append([rule])
-    return [s for s in stacks if len(s) > 1]
+            runs.append(_Run([rule]))
+    i = 0
+    while i + 1 < len(runs):
+        upper, lower = runs[i], runs[i + 1]
+        if _abut(upper, lower, chars):
+            tallest, slack = max(upper.tallest, lower.tallest), min(upper.slack, lower.slack)
+            runs[i : i + 2] = [_Run(upper.rules + lower.rules, tallest, slack)]
+            i = max(i - 1, 0)
+        else:
+            i += 1
+    return [run.rules for run in runs if len(run.rules) > 1]
+
+
+def _abut(upper: _Run, lower: _Run, chars: Sequence[Box]) -> bool:
+    """The row between ``upper`` and ``lower``, with no vertical rule inside, belongs to their table."""
+    reach = SPAN_ROW_REACH * max(upper.tallest, lower.tallest)
+    above, below = upper.rules[-1], lower.rules[0]
+    return (
+        reach > 0
+        and abs(above["x0"] - below["x0"]) <= SNAP
+        and abs(above["x1"] - below["x1"]) <= SNAP
+        and below["top"] - above["top"] <= reach
+        and _slack(above, below, chars) <= min(upper.slack, lower.slack) + FIT_SLACK
+    )
+
+
+def _slack(upper: Edge, lower: Edge, chars: Sequence[Box]) -> float:
+    """The row's height less the height its characters take; inf when it holds none."""
+    x0, x1 = max(upper["x0"], lower["x0"]), min(upper["x1"], lower["x1"])
+    inside = [c for c in chars if _between(c, x0, x1, upper, lower)]
+    if not inside:
+        return math.inf
+    return (lower["top"] - upper["top"]) - (max(c.bottom for c in inside) - min(c.top for c in inside))
+
+
+def _between(char: Box, x0: float, x1: float, upper: Edge, lower: Edge) -> bool:
+    """The character's centre lies between ``x0`` and ``x1`` and between the two rules."""
+    cx, cy = (char.x0 + char.x1) / 2, (char.top + char.bottom) / 2
+    return x0 < cx < x1 and upper["top"] < cy < lower["top"]
 
 
 def _joined(upper: Edge, lower: Edge, uprights: Sequence[Edge], x: float, left: bool) -> bool:
@@ -108,6 +170,21 @@ def _joined(upper: Edge, lower: Edge, uprights: Sequence[Edge], x: float, left: 
     else:
         lo, hi = max(upper["x0"], lower["x0"]) + SNAP, x - SNAP
     return any(lo < v["x0"] < hi and _spans(v, upper["top"], lower["top"]) for v in uprights)
+
+
+def _text_outside(
+    upper: Edge, lower: Edge, uprights: Sequence[Edge], chars: Sequence[Box], x: float, left: bool
+) -> bool:
+    """A character of the row between ``upper`` and ``lower`` lies between ``x`` and the row's
+    outermost vertical rule (the rules' far end when the row has none)."""
+    row = [v["x0"] for v in uprights if _spans(v, upper["top"], lower["top"])]
+    if left:
+        far = min(upper["x1"], lower["x1"])
+        lo, hi = x, min((v for v in row if x - SNAP < v < far), default=far)
+    else:
+        far = max(upper["x0"], lower["x0"])
+        lo, hi = max((v for v in row if far < v < x + SNAP), default=far), x
+    return any(_between(c, lo, hi, upper, lower) for c in chars)
 
 
 def _spans(upright: Edge, top: float, bottom: float) -> bool:
