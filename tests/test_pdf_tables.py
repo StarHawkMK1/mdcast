@@ -32,6 +32,7 @@ class FakeTable:
 class FakePage:
     chars: list[dict]
     tables: list[FakeTable]
+    height: float = 842.0
 
     def find_tables(self) -> list[FakeTable]:
         return self.tables

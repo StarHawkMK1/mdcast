@@ -15,8 +15,9 @@ from mdcast.readers.pdf.lines import Char, centre, page_lines
 from mdcast.readers.pdf.model import Box, Line
 from mdcast.readers.pdf.package import PdfPackage
 from mdcast.readers.pdf.paragraphs import Layout, group_paragraphs, measure_layout, to_inlines
+from mdcast.readers.pdf.repeats import BandKey, band_key, repeated, skipped_message
 from mdcast.readers.pdf.tables import PageTable, build_table, find_tables
-from mdcast.report import Report
+from mdcast.report import Codes, Report
 
 Item = Line | PageTable  # what a page's flow holds
 
@@ -24,6 +25,7 @@ Item = Line | PageTable  # what a page's flow holds
 @dataclasses.dataclass
 class Page:
     number: int  # from 0
+    height: float
     lines: list[Line]  # the text lines outside tables
     tables: list[PageTable]
     cells: dict[Box, list[Line]]  # every table cell's text lines, by the cell's box
@@ -56,17 +58,20 @@ def read_page(number: int, page: pdfplumber.page.Page) -> Page:
         )
         (outside if cell is None else cells[cell]).append(c)
     lines = page_lines(number, outside)
-    return Page(number, lines, tables, {box: page_lines(number, chars) for box, chars in cells.items()})
+    cell_lines = {box: page_lines(number, chars) for box, chars in cells.items()}
+    return Page(number, page.height, lines, tables, cell_lines)
 
 
 def read_body(pkg: PdfPackage, report: Report, assets: Assets) -> tuple[list[pf.Block], list[str]]:
     """The blocks of every page and the source text the coverage check compares with.
 
+    Running headers and footers are dropped first, so they are neither body text nor source text.
     The layout (body size, line gap, right edge) is measured once over the lines outside tables of
     the whole document, so a paragraph may run on from one page to the next; a table ends the
     paragraph before it. Table cells are grouped with the same layout.
     """
     pages = [read_page(number, page) for number, page in enumerate(pkg.pdf.pages)]
+    drop_repeats(pages, report)
     layout = measure_layout([ln for page in pages for ln in page.lines])
     flow: list[list[Line] | tuple[Page, PageTable]] = []  # body paragraphs and tables, in order
     source: list[str] = []
@@ -92,6 +97,28 @@ def read_body(pkg: PdfPackage, report: Report, assets: Assets) -> tuple[list[pf.
             page, table = piece
             blocks += build_table(table, functools.partial(cell_blocks, page, layout=layout))
     return blocks, source
+
+
+def drop_repeats(pages: Sequence[Page], report: Report) -> None:
+    """Take the lines outside tables that repeat in a page's top or bottom band out of the pages.
+
+    Each page's band is measured with its own height. Table cells are never dropped.
+    """
+    keys = [[band_key(ln.box, page.height, ln.text) for ln in page.lines] for page in pages]
+    drop = repeated([set(k) - {None} for k in keys])
+    examples: dict[BandKey, str] = {}  # the first line dropped for each key
+    dropped = 0
+    for page, page_keys in zip(pages, keys, strict=True):
+        kept = []
+        for line, key in zip(page.lines, page_keys, strict=True):
+            if key in drop:
+                examples.setdefault(key, line.text)
+                dropped += 1
+            else:
+                kept.append(line)
+        page.lines = kept
+    if dropped:
+        report.info(Codes.IMPORT_HEADER_SKIPPED, skipped_message(dropped, list(examples.values())))
 
 
 def cell_blocks(page: Page, box: Box, layout: Layout) -> list[pf.Block]:
