@@ -602,3 +602,53 @@ def test_real_scripts_are_still_written_as_tags_beside_escaped_pairs():
     again = back(md)
     assert [type(i).__name__ for i in again.content[0].content] == ["Str", "Superscript", "Subscript"]
     assert pf.stringify(again) == pf.stringify(doc)
+
+
+def test_tilde_and_caret_pairs_across_emphasis_and_links_stay_text():
+    across = [
+        [pf.Str("a~"), pf.Strong(pf.Str("b~c"))],
+        [pf.Strong(pf.Str("a~b")), pf.Str("~c")],
+        [pf.Emph(pf.Str("a~b")), pf.Strong(pf.Str("c~d"))],
+        [pf.Str("x^"), pf.Emph(pf.Str("y^z"))],
+        [pf.Str("a~"), pf.Link(pf.Str("b~c"), url="http://x")],
+    ]
+    for inlines in across:
+        doc = doc_with(pf.Para(*inlines))
+        md = write_md(doc, {})
+        again = back(md)
+        assert scripts(again) == [], md
+        assert pf.stringify(again) == pf.stringify(doc), md
+
+
+def test_tildes_beside_and_inside_strikeout_stay_text():
+    cases = [
+        [pf.Str("10~"), pf.Strikeout(pf.Str("x"))],
+        [pf.Strikeout(pf.Str("x")), pf.Str("~10")],
+        [pf.Strikeout(pf.Str("a~b"))],
+        [pf.Str("a~"), pf.Strikeout(pf.Str("b~c"))],
+        [pf.Strikeout(pf.Str("a"), pf.Space(), pf.Str("10~20"), pf.Space(), pf.Str("b"))],
+        [pf.Str("10~20"), pf.Strikeout(pf.Str("x"))],
+    ]
+    for inlines in cases:
+        doc = doc_with(pf.Para(*inlines))
+        md = write_md(doc, {})
+        again = back(md)
+        assert scripts(again) == [], md
+        assert kinds(again) == kinds(doc) and len(strikes(again)) == 1, md
+        assert pf.stringify(again) == pf.stringify(doc), md
+
+
+def strikes(doc: pf.Doc) -> list[pf.Strikeout]:
+    found: list = []
+    doc.walk(lambda e, d: found.append(e) if isinstance(e, pf.Strikeout) else None)
+    return found
+
+
+def test_tilde_and_caret_pairs_in_frontmatter_title_and_author_stay_text():
+    from mdcast.readers.md import read_md
+
+    for text in ("서울~대전~부산", "2^10^", "a~b~c d^e", "2026.1~2026.12"):
+        md = write_md(doc_with(pf.Para(pf.Str("x"))), {"title": text, "author": [text, "b"]})
+        meta = read_md(Source(md.encode(), "t.md", Format.MD), Report("t.md", Format.MD)).frontmatter
+        assert meta["title"] == text, md
+        assert meta["author"] == [text, "b"], md

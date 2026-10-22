@@ -33,6 +33,11 @@ def _frontmatter(data: dict[str, Any]) -> str:
     picked = {k: data[k] for k in FRONTMATTER_KEYS if data.get(k) not in (None, "", [], {})}
     if not picked:
         return ""
+    for key in ("title", "author"):  # read back as markdown: ``~a~`` would be a subscript
+        if isinstance(picked.get(key), str):
+            picked[key] = _escape_text_pairs(picked[key])
+        elif isinstance(picked.get(key), list):
+            picked[key] = [_escape_text_pairs(v) if isinstance(v, str) else v for v in picked[key]]
     return "---\n" + yaml.safe_dump(picked, allow_unicode=True, sort_keys=False) + "---\n\n"
 
 
@@ -162,40 +167,38 @@ _RUN_ENDS = (pf.Space, pf.SoftBreak, pf.LineBreak)
 _LITERAL = (pf.Code, pf.Math, pf.RawInline, pf.Note)  # no marks of their own to read; a note's blocks are walked apart
 
 
-def _escape_pairs(inlines: pf.ListContainer) -> None:
-    """Escape every ``~`` / ``^`` that a later one in the same unbroken run would pair with.
+_STRIKE = "~~"  # a strikeout's delimiters, in the run where they are written
 
-    A run is what lies between spaces and breaks; inlines inside it (bold, links, note marks) do
-    not end it, as they do not end a pair. The last mark of a run is left as it is, so a lone
-    ``~`` (``2026.1~2026.12``, ``10~20 %``) is written bare.
+
+def _lay_out_marks(inlines: pf.ListContainer, events: list) -> None:
+    """List the marks, run ends (``None``) and strikeout delimiters in the order they are written.
+
+    Bold, links and other containers do not end a run: a pair reaches across their delimiters.
     """
     for elem in inlines:
-        if not isinstance(elem, _LITERAL) and isinstance(getattr(elem, "content", None), pf.ListContainer):
-            _escape_pairs(elem.content)
-    marks: list[tuple[int, int, str]] = []  # (inline, character, mark) of the run so far
-    escape: set[tuple[int, int]] = set()
-
-    def end_run() -> None:
-        for mark in _SCRIPT_MARKS:
-            found = [(i, j) for i, j, m in marks if m == mark]
-            escape.update(found[:-1])
-        marks.clear()
-
-    for i, elem in enumerate(inlines):
         if isinstance(elem, _RUN_ENDS):
-            end_run()
+            events.append(None)
         elif isinstance(elem, pf.Str):
             for j, char in enumerate(elem.text):
                 if char in _PAIR_ENDS:
-                    end_run()
+                    events.append(None)
                 elif char in _SCRIPT_MARKS:
-                    marks.append((i, j, char))
-    end_run()
-    if not escape:
-        return
+                    events.append((elem, j, char))
+        elif not isinstance(elem, _LITERAL) and isinstance(getattr(elem, "content", None), pf.ListContainer):
+            strike = isinstance(elem, pf.Strikeout)
+            if strike:
+                events.append(_STRIKE)
+            _lay_out_marks(elem.content, events)
+            if strike:
+                events.append(_STRIKE)
+
+
+def _split_escaped(inlines: pf.ListContainer, escape: dict[int, list[int]]) -> None:
     out: list[pf.Inline] = []
-    for i, elem in enumerate(inlines):
-        cuts = sorted(j for k, j in escape if k == i)
+    for elem in inlines:
+        if not isinstance(elem, _LITERAL) and isinstance(getattr(elem, "content", None), pf.ListContainer):
+            _split_escaped(elem.content, escape)
+        cuts = sorted(escape.get(id(elem), [])) if isinstance(elem, pf.Str) else []
         if not cuts:
             out.append(elem)
             continue
@@ -208,6 +211,42 @@ def _escape_pairs(inlines: pf.ListContainer) -> None:
         if start < len(elem.text):
             out.append(pf.Str(elem.text[start:]))
     inlines[:] = out
+
+
+def _escape_pairs(inlines: pf.ListContainer) -> None:
+    """Escape every ``~`` / ``^`` that a later one in the same unbroken run would pair with.
+
+    A run is what lies between spaces and breaks; inlines inside it (bold, links, note marks) do
+    not end it, as they do not end a pair. The last mark of a run is left as it is, so a lone
+    ``~`` (``2026.1~2026.12``, ``10~20 %``) is written bare — unless a strikeout's ``~~`` is
+    written in the same run: every ``~`` there would run into it.
+    """
+    events: list = []
+    _lay_out_marks(inlines, events)
+    escape: dict[int, list[int]] = {}
+    run: list = []
+    for event in [*events, None]:
+        if event is not None:
+            run.append(event)
+            continue
+        marks = [e for e in run if e != _STRIKE]
+        struck = _STRIKE in run
+        for mark in _SCRIPT_MARKS:
+            found = [(elem, j) for elem, j, m in marks if m == mark]
+            for elem, j in found if struck and mark == "~" else found[:-1]:
+                escape.setdefault(id(elem), []).append(j)
+        run.clear()
+    if escape:
+        _split_escaped(inlines, escape)
+
+
+def _escape_text_pairs(text: str) -> str:
+    """:func:`_escape_pairs` for a frontmatter string, which pandoc reads as markdown."""
+    out: list[str] = []
+    for run in re.split(r"([ \t\n]+)", text):
+        last = {mark: run.rfind(mark) for mark in _SCRIPT_MARKS}
+        out.append("".join("\\" + c if c in _SCRIPT_MARKS and i != last[c] else c for i, c in enumerate(run)))
+    return "".join(out)
 
 
 def _escape_block_pairs(elem: pf.Element, _doc: pf.Doc):
