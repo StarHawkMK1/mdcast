@@ -59,7 +59,7 @@ def starts_block(text: str) -> bool:
     return list_marker(text) is not None or heading_shape(text) is not None or text.startswith("※")
 
 
-SOFT_HYPHEN = "­"  # typst (and others) write a hyphenation break into the text layer as this
+SOFT_HYPHEN = "\u00ad"  # typst (and others) write a hyphenation break into the text layer as this
 
 
 def join_text(prev: str, nxt: str) -> str:
