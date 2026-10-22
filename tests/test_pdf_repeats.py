@@ -6,11 +6,13 @@ from pdf_builder import typst_pdf
 from mdcast.pipeline import convert
 from mdcast.readers.pdf import read_pdf
 from mdcast.readers.pdf.model import Box
-from mdcast.readers.pdf.repeats import band_key, repeated
+from mdcast.readers.pdf.repeats import band_key, isolated, repeated
 from mdcast.report import Codes, Level, Report
 from mdcast.types import Format, Source
 
 _PAGE_NUMBER = r'footer: align(center)[\- #context counter(page).display() -]'
+# a paragraph wrapping over several lines, so a page has real body text
+_BODY = "본문 글은 여러 줄에 걸쳐 이어지는 한 문단입니다. " * 8 + "끝."
 
 
 def pdf_source(data: bytes) -> Source:
@@ -84,12 +86,51 @@ def test_mixed_page_sizes():
     assert result.report.coverage == 1.0
 
 
+def test_centred_page_numbers_past_nine_removed():
+    """A centred "- 10 -" starts half a digit left of "- 9 -", but its centre is in the same place."""
+    words = "가나다라마바사아자차카타"
+    data = typst_pdf(pages(*(f"본문 {w}" for w in words)), page=f'paper: "a4", {_PAGE_NUMBER}')
+    body = text(data)
+    assert all(f"본문 {w}" in body for w in words)
+    assert not [n for n in range(1, 13) if f"- {n} -" in body]
+    [event] = skipped(convert(pdf_source(data), [Format.MD]))
+    assert "12줄" in event.message
+
+
+def test_chapter_lines_opening_each_page_kept():
+    """Lines that differ only in their digits go only when they stand apart from the body."""
+    data = typst_pdf(pages(*(f"제{n}장 개요\n\n{_BODY}" for n in range(1, 6))))
+    result = convert(pdf_source(data), [Format.MD])
+    md = result.outputs[0].data.decode("utf-8")
+    assert all(f"제{n}장 개요" in md for n in range(1, 6))
+    assert not skipped(result)
+    assert result.report.coverage == 1.0
+
+
 def test_band_key_needs_the_whole_box_in_a_band():
-    assert band_key(Box(100, 10, 200, 20), 800, "머리말 3쪽") == ("top", "머리말 쪽", 20)
-    assert band_key(Box(100, 760, 200, 790), 800, "12") == ("bottom", "", 20)
+    [top] = {key[:2] for key in band_key(Box(100, 10, 200, 20), 800, "머리말 3쪽")}
+    assert top == ("top", "머리말 쪽")
+    [bottom] = {key[:2] for key in band_key(Box(100, 760, 200, 790), 800, "12")}
+    assert bottom == ("bottom", "")
     assert band_key(Box(100, 400, 200, 410), 800, "본문") is None
     assert band_key(Box(0, 0, 600, 800), 800) is None  # a whole-page picture is in no band
     assert band_key(Box(0, 10, 600, 100), 800) is None  # reaches out of the top band
+
+
+def test_band_key_matches_near_places_across_a_bucket_edge():
+    def key(x0: float, x1: float) -> frozenset:
+        return band_key(Box(x0, 790, x1, 800), 842, "- 9 -")
+
+    assert key(290, 304.99) & key(290.02, 305.01)  # centres either side of 297.5, a rounding edge
+    assert key(287, 308) & key(290, 305)  # "- 10 -" and "- 9 -": same centre, start and end apart
+    assert not key(290, 305) & key(302, 317)  # 12 pt apart is another place
+
+
+def test_isolated_needs_a_gap_of_one_and_a_half_lines():
+    line = Box(100, 70, 200, 81)
+    assert isolated(line, 11, [Box(100, 100, 200, 111)])  # 19 pt below
+    assert not isolated(line, 11, [Box(100, 90, 200, 101)])  # 9 pt below: the next body line
+    assert not isolated(Box(100, 790, 200, 801), 11, [Box(100, 770, 200, 781)])  # 9 pt above
 
 
 def test_repeated_needs_min_pages_and_half_the_pages():

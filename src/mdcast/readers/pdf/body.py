@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+from collections import defaultdict
 from collections.abc import Sequence
 
 import panflute as pf
@@ -15,7 +16,14 @@ from mdcast.readers.pdf.lines import Char, centre, page_lines
 from mdcast.readers.pdf.model import Box, Line
 from mdcast.readers.pdf.package import PdfPackage
 from mdcast.readers.pdf.paragraphs import Layout, group_paragraphs, measure_layout, to_inlines
-from mdcast.readers.pdf.repeats import BandKey, band_key, repeated, skipped_message
+from mdcast.readers.pdf.repeats import (
+    BandKey,
+    band_key,
+    digitless,
+    isolated,
+    repeated,
+    skipped_message,
+)
 from mdcast.readers.pdf.tables import PageTable, build_table, find_tables
 from mdcast.report import Codes, Report
 
@@ -102,17 +110,31 @@ def read_body(pkg: PdfPackage, report: Report, assets: Assets) -> tuple[list[pf.
 def drop_repeats(pages: Sequence[Page], report: Report) -> None:
     """Take the lines outside tables that repeat in a page's top or bottom band out of the pages.
 
-    Each page's band is measured with its own height. Table cells are never dropped.
+    Each page's band is measured with its own height; table cells are never dropped. A repeat whose
+    lines all say the same goes on repetition alone. One whose lines differ in their digits (page
+    numbers, but also "제1장", "제2장" opening each page) goes only where a line stands apart from
+    the page's body: no other line or table within ``GAP`` of it.
     """
-    keys = [[band_key(ln.box, page.height, ln.text) for ln in page.lines] for page in pages]
-    drop = repeated([set(k) - {None} for k in keys])
-    examples: dict[BandKey, str] = {}  # the first line dropped for each key
+    keys = [
+        [band_key(ln.box, page.height, ln.text) or frozenset() for ln in page.lines] for page in pages
+    ]
+    drop = repeated([set().union(*page_keys) for page_keys in keys])
+    texts: dict[BandKey, set[str]] = defaultdict(set)  # what the lines of each repeat say
+    for page, page_keys in zip(pages, keys, strict=True):
+        for line, line_keys in zip(page.lines, page_keys, strict=True):
+            for key in line_keys & drop:
+                texts[key].add(line.text)
+    examples: dict[str, str] = {}  # the first line dropped for each text without digits
     dropped = 0
     for page, page_keys in zip(pages, keys, strict=True):
+        body = [ln.box for ln, k in zip(page.lines, page_keys, strict=True) if not k & drop]
+        body += [table.box for table in page.tables]
         kept = []
-        for line, key in zip(page.lines, page_keys, strict=True):
-            if key in drop:
-                examples.setdefault(key, line.text)
+        for line, line_keys in zip(page.lines, page_keys, strict=True):
+            hits = line_keys & drop
+            same = any(len(texts[key]) == 1 for key in hits)
+            if hits and (same or isolated(line.box, line.size, body)):
+                examples.setdefault(digitless(line.text), line.text)
                 dropped += 1
             else:
                 kept.append(line)
