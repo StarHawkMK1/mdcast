@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import io
 
-from pdf_builder import typst_pdf
+import pytest
+from pdf_builder import helvetica_pdf, typst_pdf
 from PIL import Image
 
 from mdcast.pipeline import convert
@@ -112,3 +113,16 @@ def test_lines_off_to_the_right_are_not_a_column():
     beside = [line(320, 520, 60 + 20 * i) for i in range(MIN_SIDE_LINES)]
     assert not multicolumn(left + apart, 595)
     assert multicolumn(left + beside, 595)
+
+
+@pytest.mark.parametrize("media_box", [(0, 0, 612, 792), (200, 300, 812, 1092)], ids=["origin", "offset"])
+def test_two_columns_on_a_page_box_away_from_the_origin(media_box):
+    """The gutter window is 30–70% of the page's own width, from the page box's left edge: the
+    gutter here (about 290–330 pt into the page) lies outside that window counted from x = 0."""
+    x0, _, _, y1 = media_box
+    rows = [(x0 + 150, x0 + 330, y1 - 72 - 16 * k) for k in range(20)]
+    data = helvetica_pdf([[*((left, y, "Left column text") for left, _, y in rows),
+                           *((right, y, "Right column text") for _, right, y in rows)]], media_box)
+    result = convert(Source(data, "x.pdf", Format.PDF), [Format.MD])
+    [event] = warnings(result, Codes.PDF_MULTICOLUMN_SUSPECTED)
+    assert event.where == {"pages": [1]}

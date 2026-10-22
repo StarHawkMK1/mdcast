@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import panflute as pf
-from pdf_builder import typst_pdf
+import pytest
+from pdf_builder import helvetica_pdf, typst_pdf
 
 from mdcast.pipeline import convert
 from mdcast.readers.pdf import read_pdf
@@ -105,6 +106,30 @@ def test_chapter_lines_opening_each_page_kept():
     assert all(f"제{n}장 개요" in md for n in range(1, 6))
     assert not skipped(result)
     assert result.report.coverage == 1.0
+
+
+_LABELS = [f"Form field label {chr(65 + k)}" for k in range(20)]  # the same on every page
+
+
+@pytest.mark.parametrize("media_box", [(0, 0, 612, 792), (200, 300, 812, 1092)], ids=["origin", "offset"])
+def test_bands_measured_from_the_page_box(media_box):
+    """A page box away from the origin (pdfplumber keeps its offset) has its bands where the
+    page's top and bottom are: body lines repeated on every page stay, the header and footer go."""
+    x0, y0, x1, y1 = media_box
+    data = helvetica_pdf(
+        [
+            [(x0 + 72, y1 - 30, "Running header"), ((x0 + x1) / 2 - 15, y0 + 25, f"- {n} -")]
+            + [(x0 + 72, y1 - 120 - 24 * k, label) for k, label in enumerate(_LABELS)]
+            for n in range(1, 6)
+        ],
+        media_box,
+    )
+    result = convert(pdf_source(data), [Format.MD])
+    md = result.outputs[0].data.decode("utf-8")
+    assert sum(md.count(label) for label in _LABELS) == 5 * len(_LABELS)
+    assert "Running header" not in md and "- 3 -" not in md
+    [event] = skipped(result)
+    assert "10줄" in event.message
 
 
 def test_band_key_needs_the_whole_box_in_a_band():

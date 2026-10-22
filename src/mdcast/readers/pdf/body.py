@@ -50,6 +50,11 @@ class Page:
     cell_pictures: dict[Box, list[Picture]] = dataclasses.field(default_factory=dict)
     small: int = 0  # pictures dropped as decoration
     warnings: frozenset[str] = frozenset()  # the codes ``warn_pages`` gives for this page
+    origin: tuple[float, float] = (0.0, 0.0)  # the page box's left and top: pdfplumber keeps its offset
+
+    def relative(self, box: Box) -> Box:
+        """``box`` measured from the page box's top-left corner, as bands are."""
+        return relative(box, self.origin)
 
     def flow(self) -> list[Item]:
         """Lines, tables and pictures in reading order: top to bottom, left to right at the same height."""
@@ -96,8 +101,10 @@ def read_page(number: int, page: pdfplumber.page.Page) -> Page:
     small = sum(is_small(box) for box in boxes)
 
     page_box = Box(*page.bbox)
+    origin = (page_box.x0, page_box.top)
+    split = [dataclasses.replace(ln, box=relative(ln.box, origin)) for ln in page_lines(number, outside, split=SPLIT)]
     warnings: set[str] = set()
-    if multicolumn(page_lines(number, outside, split=SPLIT), page_box.width):
+    if multicolumn(split, page_box.width):
         warnings.add(Codes.PDF_MULTICOLUMN_SUSPECTED)
     if scanned(sum(bool(c["text"].strip()) for c in page.chars), boxes, page_box):
         warnings.add(Codes.PDF_SCANNED_SUSPECTED)
@@ -105,8 +112,18 @@ def read_page(number: int, page: pdfplumber.page.Page) -> Page:
         warnings.add(Codes.IMPORT_OBJECT_SKIPPED)
     return Page(
         number, page.height, lines, tables, cell_lines, pictures, dict(cell_pictures), small,
-        frozenset(warnings),
+        frozenset(warnings), origin,
     )
+
+
+def relative(box: Box, origin: tuple[float, float]) -> Box:
+    """``box`` moved so that ``origin`` (a page box's left and top) is 0, 0.
+
+    A page box need not start at the origin (MediaBox ``[200 300 812 1092]``), and pdfplumber keeps
+    the offset. Positions read as shares of the page (the bands, the gutter) are measured from it.
+    """
+    x0, top = origin
+    return Box(box.x0 - x0, box.top - top, box.x1 - x0, box.bottom - top)
 
 
 class Drawings:
@@ -203,14 +220,14 @@ def drop_repeats(pages: Sequence[Page], report: Report) -> None:
     """Take the lines and pictures outside tables that repeat in a page's top or bottom band out of
     the pages.
 
-    Each page's band is measured with its own height; table cells are never dropped. A repeated
+    Each page's band is measured on its own page box; table cells are never dropped. A repeated
     picture (a logo) goes on repetition alone, as does a repeat whose lines all say the same. One
     whose lines differ in their digits (page numbers, but also "제1장", "제2장" opening each page)
     goes only where a line stands apart from the page's body: no other line, table or picture
     within ``GAP`` of it. Pictures repeat apart from lines: a picture keys with no text, as a bare
     page number does, yet the two never make one repeat.
     """
-    picture_keys = [[band_key(p.box, page.height) or frozenset() for p in page.pictures] for page in pages]
+    picture_keys = [[band_key(page.relative(p.box), page.height) or frozenset() for p in page.pictures] for page in pages]
     drop_pictures = repeated([set().union(*page_keys) for page_keys in picture_keys])
     pictures = 0
     for page, page_keys in zip(pages, picture_keys, strict=True):
@@ -219,7 +236,7 @@ def drop_repeats(pages: Sequence[Page], report: Report) -> None:
         page.pictures = kept_pictures
 
     keys = [
-        [band_key(ln.box, page.height, ln.text) or frozenset() for ln in page.lines] for page in pages
+        [band_key(page.relative(ln.box), page.height, ln.text) or frozenset() for ln in page.lines] for page in pages
     ]
     drop = repeated([set().union(*page_keys) for page_keys in keys])
     texts: dict[BandKey, set[str]] = defaultdict(set)  # what the lines of each repeat say
