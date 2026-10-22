@@ -33,6 +33,8 @@ class FakePage:
     chars: list[dict]
     tables: list[FakeTable]
     height: float = 842.0
+    bbox: tuple[float, float, float, float] = (0, 0, 595, 842)
+    images: tuple[dict, ...] = ()
 
     def find_tables(self) -> list[FakeTable]:
         return self.tables

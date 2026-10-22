@@ -57,7 +57,11 @@ def isolated(box: Box, size: float, body: Iterable[Box]) -> bool:
     return all(max(other.top - box.bottom, box.top - other.bottom) >= GAP * size for other in body)
 
 
-def skipped_message(lines: int, examples: Sequence[str]) -> str:
-    """What IMPORT_HEADER_SKIPPED says: how many lines were removed, with one or two of them."""
+def skipped_message(lines: int, examples: Sequence[str], pictures: int = 0) -> str:
+    """What IMPORT_HEADER_SKIPPED says: how many lines and pictures were removed, with one or two
+    of the lines."""
+    if not lines:
+        return f"쪽마다 반복되는 머리말·꼬리말 그림 {pictures}개를 가져오지 않습니다"
     shown = ", ".join(f"'{text}'" for text in examples[:2])
-    return f"쪽마다 반복되는 머리말·꼬리말 {lines}줄을 가져오지 않습니다 (예: {shown})"
+    what = f"{lines}줄과 그림 {pictures}개를" if pictures else f"{lines}줄을"
+    return f"쪽마다 반복되는 머리말·꼬리말 {what} 가져오지 않습니다 (예: {shown})"
