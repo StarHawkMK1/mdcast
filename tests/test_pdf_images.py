@@ -102,6 +102,26 @@ def test_image_in_cell():
     assert isinstance(mixed.content[1].content[0], pf.Image)
     assert not [b for b in doc.content if not isinstance(b, pf.Table)]  # nothing leaks into the body
 
+    md = convert(pdf_source(data), [Format.MD]).outputs[0].data
+    [back] = [b for b in read_md(Source(md, "x.md", Format.MD), Report("x.md", Format.MD)).doc.content
+              if isinstance(b, pf.Table)]
+    only, mixed = back.content[0].content[0].content
+    assert [type(b) for b in only.content] == [pf.Plain] and [type(b) for b in mixed.content] == [pf.Para, pf.Para]
+
+
+def test_pictures_only_pdf():
+    """Review Focus 1: pages holding nothing but a page-sized picture give an MD of pictures alone;
+    the same picture on every page is never a running header."""
+    page = 'paper: "a4", margin: 0pt'
+    data = pdf(pages(*['#image("a.png", width: 100%, height: 100%)'] * 4), page=page)
+    result = convert(pdf_source(data), [Format.MD])
+    out = result.outputs[0]
+    assert out.data is not None
+    assert not [e for e in result.report.events if e.level is Level.ERROR]
+    assert list(out.assets) == ["x_assets/image1.png"]
+    assert out.data.decode("utf-8").count("![그림](x_assets/image1.png)") == 4
+    assert not events(result, Codes.IMPORT_HEADER_SKIPPED)
+
 
 def test_image_in_table_outline_but_no_cell_is_body():
     @dataclass
