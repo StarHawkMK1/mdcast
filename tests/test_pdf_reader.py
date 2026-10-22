@@ -7,7 +7,7 @@ import pdfplumber
 import pytest
 from click.testing import CliRunner
 from helpers import tiny_png
-from pdf_builder import typst_pdf
+from pdf_builder import helvetica_pdf, raw_pdf, typst_pdf
 from pdfminer.pdfdocument import PDFPasswordIncorrect
 from pdfplumber.utils.exceptions import PdfminerException
 
@@ -71,6 +71,35 @@ def test_unreadable_page_tree_is_input_corrupt(monkeypatch):
     errors = [e for e in result.report.events if e.level is Level.ERROR]
     assert [e.code for e in errors] == [Codes.INPUT_CORRUPT]
     assert "PDF 파일로 열 수 없습니다" in errors[0].message
+
+
+_CATALOG = b"<< /Type /Catalog /Pages 2 0 R >>"
+
+
+@pytest.mark.parametrize(
+    "objects",
+    [
+        [_CATALOG, b"<< /Type /Pages /Kids [1 0 R 7 0 R] /Count 2 >>"],  # kids that are no pages
+        [_CATALOG, b"<< /Type /Pages /Kids [2 0 R] /Count 1 >>"],  # a page tree holding itself
+        [b"<< /Type /Catalog >>"],  # no page tree
+        [_CATALOG, b"<< /Type /Pages /Kids [] /Count 0 >>"],  # no kids
+    ],
+    ids=["kids-not-pages", "pages-cycle", "no-pages-root", "empty-kids"],
+)
+def test_pdf_without_pages_is_input_corrupt(objects):
+    """A page tree that gives no page at all is a broken file, not an empty document."""
+    result = convert(pdf_source(raw_pdf(objects)), [Format.MD])
+    errors = [e for e in result.report.events if e.level is Level.ERROR]
+    assert [e.code for e in errors] == [Codes.INPUT_CORRUPT]
+    assert "PDF 파일로 열 수 없습니다" in errors[0].message
+    assert result.outputs[0].data is None
+
+
+def test_blank_page_gives_an_empty_md():
+    """Unlike no page at all, a page with nothing on it reads as an empty document."""
+    result = convert(pdf_source(helvetica_pdf([[]])), [Format.MD])
+    assert not [e for e in result.report.events if e.level is Level.ERROR]
+    assert result.outputs[0].data == b"\n"
 
 
 def test_each_page_closed_once_read(monkeypatch):

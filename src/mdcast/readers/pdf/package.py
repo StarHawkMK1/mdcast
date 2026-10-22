@@ -41,11 +41,15 @@ def open_pdf(data: bytes) -> PdfPackage:
     except Exception as exc:  # whatever pdfminer raises, the file cannot be read
         raise PdfError(_LOCKED if _is_locked(exc) else _BROKEN) from exc
     try:
-        len(pdf.pages)  # some damage only shows once the page tree is read
+        count = len(pdf.pages)  # some damage only shows once the page tree is read
     except Exception as exc:
         with contextlib.suppress(Exception):  # close() walks the same broken pages
             pdf.close()
         raise PdfError(_BROKEN) from exc
+    if count == 0:  # a page tree missing, empty, or of no pages: a blank page still counts
+        with contextlib.suppress(Exception):
+            pdf.close()
+        raise PdfError(_BROKEN)
     try:
         info = pdf.metadata
         title, author = _text(info.get("Title")), _text(info.get("Author"))
