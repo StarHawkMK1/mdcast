@@ -652,3 +652,23 @@ def test_tilde_and_caret_pairs_in_frontmatter_title_and_author_stay_text():
         meta = read_md(Source(md.encode(), "t.md", Format.MD), Report("t.md", Format.MD)).frontmatter
         assert meta["title"] == text, md
         assert meta["author"] == [text, "b"], md
+
+
+def _merged_with(text: str) -> pf.Table:
+    return make_table([[cell(txt("h"), colspan=2)]], [[cell(txt(text)), cell(pf.Plain(pf.Code(text)))]])
+
+
+def test_html_cell_gets_no_variation_selector_from_pandoc():
+    """pandoc's HTML writer puts U+FE0E after the two arrows; the MD keeps the cell's own text."""
+    text = "a\u2194b \u21a9c"
+    md = write_md(doc_with(_merged_with(text)), {})
+    assert "<table>" in md and "\ufe0e" not in md
+    got = tables(back(md))[0].content[0].content[0].content
+    assert [pf.stringify(c).strip() for c in got] == [text, text]
+
+
+def test_html_cell_keeps_a_variation_selector_it_has():
+    for text in ("a\u2194\ufe0eb", "a\u2194\ufe0fb"):
+        md = write_md(doc_with(_merged_with(text)), {})
+        got = tables(back(md))[0].content[0].content[0].content
+        assert [pf.stringify(c).strip() for c in got] == [text, text]

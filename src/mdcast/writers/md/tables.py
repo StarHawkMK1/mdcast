@@ -14,6 +14,9 @@ _TAG = re.compile(r"<[A-Za-z][^<>]*>")
 # the math class is kept: read_md turns <span class="math inline|display"> back into math
 _NOISE_ATTR = re.compile(r'\s(?:style|width|height|id)="[^"]*"|\sclass="(?!math (?:inline|display)")[^"]*"')
 _MATH_SPAN = {"InlineMath": ("inline", r"\(", r"\)"), "DisplayMath": ("display", r"\[", r"\]")}
+# pandoc's HTML writer puts U+FE0E (text presentation) after these unless one already follows,
+# so ``↔`` would come back as ``↔\ufe0e``: they are kept away from pandoc and put back afterwards
+_HTML_VARIATION_CHARS = "\u2194\u21a9"  # ↔ ↩
 
 
 def _has_line_break(cell: pf.TableCell) -> bool:
@@ -83,9 +86,10 @@ class CellBatch:
     swaps the placeholders for the rendered text, also inside rendered cells (nested tables).
     """
 
-    def __init__(self, to: str, finish: Callable[[str], str]) -> None:
+    def __init__(self, to: str, finish: Callable[[str], str], shield: str = "") -> None:
         self._to = to
         self._finish = finish
+        self._shield = shield  # characters pandoc must not see: each goes as a token and comes back
         self._jobs: list[list[pf.Block]] = []
         self._texts: list[str] = []
         self._mark = f"mdcast-cell-{secrets.token_hex(6)}"
@@ -104,18 +108,28 @@ class CellBatch:
             if i:
                 content.append(pf.RawBlock(separator, "html"))
             content += job
+        if self._shield:
+            for block in content:
+                block.walk(self._hide)
         text = convert_doc(pf.Doc(*content), self._to, extra_args=["--wrap=none", *QUIET])
+        if self._shield:
+            text = re.sub(rf"{self._mark}x([0-9a-f]+)x", lambda m: chr(int(m.group(1), 16)), text)
         parts = text.split(separator)
         if len(parts) != len(self._jobs):
             raise RuntimeError(f"표 칸 {len(self._jobs)}개를 나누지 못했습니다 ({len(parts)}조각)")
         self._texts = [self._finish(part) for part in parts]
+
+    def _hide(self, elem: pf.Element, _doc: pf.Doc) -> None:
+        if isinstance(elem, (pf.Str, pf.Code, pf.CodeBlock)):
+            for ch in self._shield:
+                elem.text = elem.text.replace(ch, f"{self._mark}x{ord(ch):x}x")
 
     def fill(self, text: str) -> str:
         return self._slot.sub(lambda m: self.fill(self._texts[int(m.group(1))]), text)
 
 
 def html_batch() -> CellBatch:
-    return CellBatch("html", _clean)
+    return CellBatch("html", _clean, shield=_HTML_VARIATION_CHARS)
 
 
 def pipe_batch() -> CellBatch:
