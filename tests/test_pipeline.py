@@ -91,7 +91,8 @@ def test_writer_oserror_is_contained(tmp_path, monkeypatch):
     assert errors == [(Codes.RENDER_FAILED, "docx")]
 
 
-def test_pdf_input_is_imported(tmp_path):
+def test_pdf_input_reaches_the_importer(tmp_path):
+    """A .pdf goes to the pdf reader, not the MD path: a broken one fails there as INPUT_CORRUPT."""
     result = pipeline.convert(Source(b"%PDF", "a.pdf", Format.PDF), [Format.MD], options=opts(tmp_path))
     assert statuses(result) == {"md": "failed"}
     assert [e.code for e in result.report.events] == [Codes.INPUT_CORRUPT]
