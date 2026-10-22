@@ -14,7 +14,7 @@ from mdcast.readers.md import read_md
 from mdcast.readers.pdf import read_pdf
 from mdcast.readers.pdf.body import read_page
 from mdcast.readers.pdf.model import Box
-from mdcast.readers.pdf.tables import PageTable, build_table
+from mdcast.readers.pdf.tables import PageTable, build_table, open_sides
 from mdcast.report import Report
 from mdcast.types import Format, Source
 
@@ -36,6 +36,7 @@ class FakePage:
     bbox: tuple[float, float, float, float] = (0, 0, 595, 842)
     images: tuple[dict, ...] = ()
     curves: tuple[dict, ...] = ()
+    edges: tuple[dict, ...] = ()  # no ruling lines: no side is closed
 
     def find_tables(self) -> list[FakeTable]:
         return self.tables
@@ -194,6 +195,52 @@ def test_merged_table_reads_back_from_md():
     assert cell_texts(table) == [["a", "b"], ["c", "d", "e"]]
     assert spans(table) == [[(1, 2), (1, 1)], [(1, 1), (1, 1), (1, 1)]]
     assert len(table.head.content) == 1
+
+
+# row rules and inner column rules only: no rule down the outer left and right sides
+_OPEN_SIDES = "stroke: (x, y) => (top: 0.5pt, bottom: 0.5pt, left: if x > 0 { 0.5pt } else { none }, right: none)"
+
+
+def test_open_sided_table_keeps_its_outer_cells():
+    data = typst_pdf(
+        f"{_BODY}\n\n#table(columns: 3, {_OPEN_SIDES}, [머리 가], [머리 나], [머리 다], "
+        "table.cell(rowspan: 2)[묶음], [칸 가], [칸 나], [칸 다], [칸 라])"
+    )
+    found = list(read_pdf(pdf_source(data), Report("a.pdf", Format.PDF), "a_assets").doc.content)
+    assert [type(b) for b in found] == [pf.Para, pf.Table]  # nothing of the table follows it as body text
+    [table] = tables(found)
+    assert cell_texts(table) == [["머리 가", "머리 나", "머리 다"], ["묶음", "칸 가", "칸 나"], ["칸 다", "칸 라"]]
+    assert spans(table) == [[(1, 1)] * 3, [(2, 1), (1, 1), (1, 1)], [(1, 1), (1, 1)]]
+    assert convert(pdf_source(data), [Format.MD]).report.coverage == 1.0
+
+
+def test_two_rules_around_text_are_no_table():
+    found = blocks(f"#line(length: 100%)\n\n{_BODY}\n\n#line(length: 100%)")
+    assert not tables(found)
+    assert [type(b) for b in found] == [pf.Para]
+
+
+def _rule(x0: float, x1: float, y: float) -> dict:
+    return {"orientation": "h", "x0": x0, "x1": x1, "top": y, "bottom": y}
+
+
+def _upright(x: float, top: float, bottom: float) -> dict:
+    return {"orientation": "v", "x0": x, "x1": x, "top": top, "bottom": bottom}
+
+
+def test_open_sides_spans_only_the_stack():
+    rules = [_rule(0, 300, y) for y in (100, 120, 140)]
+    inner = [_upright(100, 100, 140), _upright(200, 100, 140)]
+    unrelated = [_rule(0, 300, 400), _rule(0, 300, 420)]  # the same ends, but nothing joins them
+    sides = open_sides([*rules, *inner, *unrelated])
+    assert sorted((s["x0"], s["top"], s["bottom"]) for s in sides) == [(0, 100, 140), (300, 100, 140)]
+
+
+def test_open_sides_leaves_ruled_tables_alone():
+    # the row rules overhang the side rules by 2pt, as the corpus's fully ruled tables do
+    rules = [_rule(0, 300, y) for y in (100, 120, 140)]
+    sides = [_upright(2, 100, 140), _upright(150, 100, 140), _upright(298, 100, 140)]
+    assert open_sides([*rules, *sides]) == []
 
 
 @pytest.mark.parametrize("inset", ["", "inset: (left: 0pt, rest: 5pt), "], ids=["inset", "flush-left"])

@@ -137,6 +137,7 @@ def test_image_in_table_outline_but_no_cell_is_body():
         height: float = 842.0
         bbox: tuple[float, float, float, float] = (0, 0, 595, 842)
         curves: tuple[dict, ...] = ()
+        edges: tuple[dict, ...] = ()  # no ruling lines: no side is closed
 
         def find_tables(self) -> list[FakeTable]:
             return self.tables

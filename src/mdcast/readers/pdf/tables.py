@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 import panflute as pf
 import pdfplumber
@@ -12,6 +13,9 @@ from mdcast.readers.grid import Slot, filled, grow_head, squeeze
 from mdcast.readers.pdf.model import Box
 
 SNAP = 1.0  # pt. Cell edges this close lie on one grid line
+OPEN_SIDE = 3.0  # pt. A side rule further in than this from the row rules' ends leaves the side open
+
+Edge = Mapping[str, Any]  # a pdfplumber edge: x0, x1, top, bottom, orientation ("h" or "v")
 
 
 @dataclass
@@ -25,14 +29,103 @@ def find_tables(page: pdfplumber.page.Page) -> list[PageTable]:
 
     Borderless tables are not looked for: their text stays body text. pdfplumber leaves out a
     table of a single cell, so a lone ruled box is body text too. A table drawn inside another's
-    cell is left out as well: its text is the outer cell's (spec §4.4).
+    cell is left out as well: its text is the outer cell's (spec §4.4). A table drawn without
+    its outer left or right rule is closed first (:func:`open_sides`).
     """
     kept: list[PageTable] = []
-    found = [_table(Box(*t.bbox), t.cells) for t in page.find_tables()]
+    sides = open_sides(_ruling(e for e in page.edges if e["object_type"] != "curve_edge"))  # rules, not drawings
+    found_tables = page.find_tables({"explicit_vertical_lines": sides}) if sides else page.find_tables()
+    found = [_table(Box(*t.bbox), t.cells) for t in found_tables]
     for table in sorted(found, key=lambda t: t.box.width * t.box.height, reverse=True):  # outer first
         if not any(_inside(table.box, outer.box) for outer in kept):
             kept.append(table)
     return kept
+
+
+def _ruling(edges: Iterable[Edge]) -> list[Edge]:
+    """``edges`` snapped and joined as pdfplumber's ``lines`` strategy does before it finds cells."""
+    s = pdfplumber.table.TableSettings.resolve(None)
+    merged = pdfplumber.table.merge_edges(
+        list(edges),
+        snap_x_tolerance=s.snap_x_tolerance,
+        snap_y_tolerance=s.snap_y_tolerance,
+        join_x_tolerance=s.join_x_tolerance,
+        join_y_tolerance=s.join_y_tolerance,
+    )
+    return pdfplumber.utils.filter_edges(merged, min_length=s.edge_min_length)
+
+
+def open_sides(edges: Sequence[Edge]) -> list[dict[str, Any]]:
+    """Vertical edges that close tables drawn without their outer left or right rule.
+
+    Korean public documents often leave a table's sides open: the row rules run out to where the
+    side rule would be, but no rule is drawn there, so pdfplumber finds no cell in the outer
+    columns. Row rules whose left (or right) ends meet within SNAP form a stack while a real
+    vertical rule inside joins each one to the next; a stack of two or more rules with no side
+    rule within OPEN_SIDE of those ends gets one from its top rule to its bottom rule. A lone pair
+    of rules with no vertical between them never forms a stack, so it never becomes a table.
+    """
+    rules = [e for e in edges if e["orientation"] == "h"]
+    uprights = [e for e in edges if e["orientation"] == "v"]
+    sides: list[dict[str, Any]] = []
+    for left in (True, False):
+        end = "x0" if left else "x1"
+        for group in _meeting(rules, end):
+            x = min(r["x0"] for r in group) if left else max(r["x1"] for r in group)
+            for stack in _stacks(group, uprights, x, left):
+                top, bottom = stack[0]["top"], stack[-1]["top"]
+                if not any(abs(v["x0"] - x) <= OPEN_SIDE and _spans(v, top, bottom) for v in uprights):
+                    sides.append(_upright(x, top, bottom))
+    return sides
+
+
+def _meeting(rules: Sequence[Edge], end: str) -> list[list[Edge]]:
+    """The rules grouped by where their ``end`` ("x0" or "x1") lies, ends within SNAP together."""
+    groups: list[list[Edge]] = []
+    for rule in sorted(rules, key=lambda r: r[end]):
+        if groups and rule[end] - groups[-1][-1][end] <= SNAP:
+            groups[-1].append(rule)
+        else:
+            groups.append([rule])
+    return groups
+
+
+def _stacks(group: Sequence[Edge], uprights: Sequence[Edge], x: float, left: bool) -> list[list[Edge]]:
+    """``group`` top to bottom, split where no vertical rule inside joins a rule to the next one."""
+    stacks: list[list[Edge]] = []
+    for rule in sorted(group, key=lambda r: r["top"]):
+        if stacks and _joined(stacks[-1][-1], rule, uprights, x, left):
+            stacks[-1].append(rule)
+        else:
+            stacks.append([rule])
+    return [s for s in stacks if len(s) > 1]
+
+
+def _joined(upper: Edge, lower: Edge, uprights: Sequence[Edge], x: float, left: bool) -> bool:
+    """A vertical rule between ``x`` and the rules' far ends runs from ``upper`` down to ``lower``."""
+    if left:
+        lo, hi = x + SNAP, min(upper["x1"], lower["x1"]) - SNAP
+    else:
+        lo, hi = max(upper["x0"], lower["x0"]) + SNAP, x - SNAP
+    return any(lo < v["x0"] < hi and _spans(v, upper["top"], lower["top"]) for v in uprights)
+
+
+def _spans(upright: Edge, top: float, bottom: float) -> bool:
+    return upright["top"] <= top + SNAP and upright["bottom"] >= bottom - SNAP
+
+
+def _upright(x: float, top: float, bottom: float) -> dict[str, Any]:
+    """A vertical edge pdfplumber takes as it is (an ``object_type`` ending in ``_edge``)."""
+    return {
+        "object_type": "virtual_edge",
+        "orientation": "v",
+        "x0": x,
+        "x1": x,
+        "top": top,
+        "bottom": bottom,
+        "width": 0.0,
+        "height": bottom - top,
+    }
 
 
 def _inside(inner: Box, outer: Box) -> bool:
