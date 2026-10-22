@@ -46,10 +46,9 @@ def test_corrupt_docx_is_input_corrupt():
     assert res.outputs[0].data is None
 
 
-def test_pdf_input_still_unsupported():
-    res = convert(Source(b"x", "a.pdf", Format.PDF), [Format.MD])
-    events = [e for e in res.report.events if e.code == Codes.INPUT_UNSUPPORTED]
-    assert events and "M3c" in events[0].message
+def test_pdf_converts_only_to_md():
+    res = convert(Source(b"x", "a.pdf", Format.PDF), [Format.DOCX])
+    assert [e.code for e in res.report.events] == [Codes.TARGET_UNSUPPORTED]
 
 
 def test_hwpx_converts_to_md_with_coverage():

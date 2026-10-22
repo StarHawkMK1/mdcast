@@ -300,9 +300,9 @@ def test_other_input_names_the_supported_kinds(env):
     assert r.exit_code == 2 and "(.md, .docx, .hwpx 파일을 지정하세요)" in r.output
 
 
-def test_convert_help_names_hwpx_import(env):
+def test_convert_help_names_hwpx_and_pdf_import(env):
     r = run("convert", "--help")
-    assert "MD 를 docx·hwpx·pdf 로, docx·hwpx 를 MD 로 변환합니다." in r.output
+    assert "MD 를 docx·hwpx·pdf 로, docx·hwpx·pdf 를 MD 로 변환합니다." in r.output
 
 
 def test_hwpx_default_target_is_md(env):

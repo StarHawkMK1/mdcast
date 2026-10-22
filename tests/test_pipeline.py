@@ -91,10 +91,10 @@ def test_writer_oserror_is_contained(tmp_path, monkeypatch):
     assert errors == [(Codes.RENDER_FAILED, "docx")]
 
 
-def test_non_md_input_is_unsupported(tmp_path):
+def test_pdf_input_is_imported(tmp_path):
     result = pipeline.convert(Source(b"%PDF", "a.pdf", Format.PDF), [Format.MD], options=opts(tmp_path))
     assert statuses(result) == {"md": "failed"}
-    assert [e.code for e in result.report.events] == [Codes.INPUT_UNSUPPORTED]
+    assert [e.code for e in result.report.events] == [Codes.INPUT_CORRUPT]
 
 
 def test_keep_temp_records_work_dir(tmp_path):

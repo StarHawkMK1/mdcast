@@ -95,10 +95,10 @@ def convert(
     report = Report(source.name, source.format)
     outputs = [Output(t, output_name(source.name, t), None) for t in dict.fromkeys(targets)]
 
-    if source.format in (Format.DOCX, Format.HWPX):
+    if source.format in (Format.DOCX, Format.HWPX, Format.PDF):
         return import_document(source, targets, options, template)
     if source.format is not Format.MD:
-        report.error(Codes.INPUT_UNSUPPORTED, f"{source.format.value} 입력은 아직 지원하지 않습니다 (M3c 예정)")
+        report.error(Codes.INPUT_UNSUPPORTED, f"{source.format.value} 입력은 아직 지원하지 않습니다")
         report.set_outputs(outputs)
         return Result(outputs, report)
     try:

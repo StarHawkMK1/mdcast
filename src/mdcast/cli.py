@@ -117,7 +117,7 @@ def _refuse_existing(result, destination: Path, force: bool) -> None:
 @click.option("--offline", is_flag=True, help="외부 이미지를 내려받지 않음")
 @click.option("--force", is_flag=True, help="가져오기 결과(.md, _assets 폴더)가 이미 있어도 덮어씀")
 def convert(input_path, to, template, out_dir, as_json, verbose, quiet, keep_temp, offline, force) -> None:
-    """MD 를 docx·hwpx·pdf 로, docx·hwpx 를 MD 로 변환합니다."""
+    """MD 를 docx·hwpx·pdf 로, docx·hwpx·pdf 를 MD 로 변환합니다."""
     if input_path.suffix.lower() == ".hwp":
         raise click.UsageError("hwp 파일은 지원하지 않습니다. 한글에서 hwpx 로 저장해 넣으세요")
     try:
