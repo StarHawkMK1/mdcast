@@ -105,6 +105,9 @@ def _promote_title(blocks: list[pf.Element], ctx: ImportContext) -> bool:
     first = next((i for i, b in enumerate(blocks) if isinstance(b, pf.Header)), None)
     if first is None:
         return False
+    head = blocks[first]
+    if head.level == 1 and _text(head) == ctx.frontmatter.get("title"):
+        return False  # the document already names its title and sets it as the first heading
     for i in range(first):
         block = blocks[i]
         if not isinstance(block, pf.Para) or not _whole_strong(block):

@@ -63,11 +63,29 @@ def test_long_or_sentence_not_heading():
 
 
 def test_slightly_larger_not_heading():
-    # default h3 is 12pt over an 11pt body (1.09×): too close to tell from body text (spec §5)
-    paragraph = para(12, "가. 소제목")
+    # 12pt over an 11pt body (1.09×) with no number in front: too close to tell from body text
+    paragraph = para(12, "소제목")
     sizes = heading_sizes([paragraph], BODY)
     assert sizes == {}
     assert heading_level(paragraph, sizes, BODY) is None
+
+
+def test_numbered_slightly_larger_is_heading():
+    # a heading number or a □ in front lets a size just above the body be a heading (D14)
+    numbered = [para(12, "가. 소제목"), para(12, "1. 개요"), para(12, "Ⅱ. 추진 방향"), para(12, "□ 목 적")]
+    paragraphs = [para(20, "제목"), *numbered, para(12, "소제목")]
+    sizes = heading_sizes(paragraphs, BODY)
+    assert sizes == {20: 1, 12: 2}
+    assert [heading_level(p, sizes, BODY) for p in paragraphs] == [1, 2, 2, 2, 2, None]
+
+
+def test_numbered_at_body_size_or_long_not_heading():
+    near_body = para(11.4, "1. 개요")  # within 0.5pt of the body: the body size
+    long = para(12, "1. " + "가" * 60)
+    sentence = para(12, "1. 개요를 적습니다.")
+    bullet = para(12, "○ 세부 항목")  # only □·■ open a heading
+    sizes = heading_sizes([near_body, long, sentence, bullet], BODY)
+    assert sizes == {}
 
 
 BODY_TEXT = "본문 글은 여러 낱말로 이어집니다. 줄이 조금 길어 집니다. 계속해서 이어지는 본문 글입니다."
@@ -96,6 +114,24 @@ def test_typst_headings_end_to_end():
         assert [type(b).__name__ for b in back.content] == ["Header", "Header", "Para", "Header", "Para"]
         assert pf.stringify(back.content[2]).strip() == BODY_TEXT
         assert not any(isinstance(e, pf.Strong) for e in headers[0].content)
+
+
+def test_bold_banner_does_not_push_the_title_down():
+    # a short bold line above the title (an agency name) stays a paragraph: the size-ranked title
+    # is the document title, so the common title rule (M3a D6-1) leaves it alone (D14)
+    data = typst_pdf(
+        "*Agency Name*\n\n"
+        "#text(size: 20pt)[Report Title]\n\n"
+        f"{BODY_TEXT}\n\n"
+        "#text(size: 16pt)[Chapter]\n\n"
+        f"{BODY_TEXT}\n"
+    )
+    result = convert(Source(data, "a.pdf", Format.PDF), [Format.MD])
+    back = read_md(Source(result.outputs[0].data, "a.md", Format.MD), Report("a.md", Format.MD))
+    headers = [(h.level, pf.stringify(h)) for h in back.doc.content if isinstance(h, pf.Header)]
+    assert headers == [(1, "Report Title"), (2, "Chapter")]
+    assert back.doc.content[0] == pf.Para(pf.Strong(pf.Str("Agency"), pf.Space(), pf.Str("Name")))
+    assert back.doc.get_metadata("title") == "Report Title"
 
 
 def test_whole_bold_heading_drops_strong(tmp_path):

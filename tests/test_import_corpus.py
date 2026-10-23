@@ -460,16 +460,16 @@ def test_pdf_notice_corpus():
         "images": 0,
         "image_files": 0,
         "assets": 0,
-        "headers": 1,
+        "headers": 19,
         "h1": 1,  # the title, page 1
-        "h2": 0,
+        "h2": 18,  # the 15pt "□ …" section lines over the 14pt body (M3c D14)
         "h3": 0,
         "h4": 0,
         "h5": 0,
         "h6": 0,
         "headings_inferred": 0,
-        "list_items": 39,
-        "lists_inferred": 39,
+        "list_items": 28,  # a lone ①/- item under a section heading stays a paragraph
+        "lists_inferred": 28,
     })
 
 
@@ -491,14 +491,14 @@ def test_pdf_guide_corpus():
         "images": 3,
         "image_files": 2,
         "assets": 2,
-        "headers": 5,
+        "headers": 29,
         "h1": 1,  # the title, page 1
         "h2": 2,  # h2, h3 and h4: large cover lines, all on page 3
         "h3": 1,
         "h4": 1,
-        "h5": 0,
-        "h6": 0,
-        "headings_inferred": 0,
+        "h5": 7,  # the 13pt numbered sections over the 12pt body (M3c D14), below the cover lines
+        "h6": 17,  # their N.M and N.M.K sub-sections, by the common heading inference
+        "headings_inferred": 17,
         "list_items": 64,
         "lists_inferred": 64,
     })

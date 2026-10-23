@@ -20,5 +20,14 @@ def read_pdf(source: Source, report: Report, assets_dir: str) -> ImportedDocumen
         blocks, source_text = read_body(pkg, report, assets)
     finally:
         pkg.pdf.close()
-    frontmatter = {k: v for k, v in (("title", pkg.title), ("author", pkg.author)) if v}
+    title = pkg.title or _first_title(blocks)
+    frontmatter = {k: v for k, v in (("title", title), ("author", pkg.author)) if v}
     return ImportedDocument(pf.Doc(*blocks), source_text, frontmatter, assets.media, pkg.generator)
+
+
+def _first_title(blocks: list[pf.Block]) -> str | None:
+    """The text of the first level-1 heading: the largest heading on the first page that has one (D14)."""
+    first = next((b for b in blocks if isinstance(b, pf.Header) and b.level == 1), None)
+    if first is None:
+        return None
+    return pf.stringify(first).strip() or None
